@@ -1,0 +1,314 @@
+import { useEffect, useMemo, useState } from "react";
+import { formatBytes, formatDateTime, formatExposure, formatOffset, nf, type Points } from "./data";
+import { LocationPicker } from "./LocationPicker";
+import type { LatLon } from "./coords";
+
+interface PhotoDetail {
+  id: number;
+  path: string;
+  name: string;
+  rel_dir: string;
+  kind: "photo" | "raw" | "video";
+  size: number;
+  taken_local: number | null;
+  tz_offset: number | null;
+  time_source: string | null;
+  gps_source: string | null;
+  lat: number | null;
+  lon: number | null;
+  alt: number | null;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  camera: string | null;
+  lens: string | null;
+  iso: number | null;
+  fnumber: number | null;
+  exposure: number | null;
+  focal: number | null;
+  country: string | null;
+}
+
+interface ViewerProps {
+  points: Points;
+  /** Photo ids, not point indices: the points array is reloaded (and reordered) when the index changes. */
+  ids: Uint32Array;
+  index: number;
+  /** Point index of a photo id in the current `points`. */
+  indexOf(id: number): number | undefined;
+  onIndex(i: number): void;
+  onClose(): void;
+  onShowOnMap(i: number): void;
+  /** The photo's location was changed; the caller should reload the index. */
+  onLocationChange(): void;
+}
+
+const GPS_SOURCE_NOTE: Record<string, string> = {
+  "inferred:burst": "Estimated: a photo with GPS was taken within minutes",
+  "inferred:stay": "Estimated: photos before and after were taken at this spot",
+  "inferred:home": "Estimated: probably home — photos before and after were taken here",
+  "inferred:nearby": "Rough estimate: a photo with GPS was taken nearby within the hour",
+};
+
+const TIME_SOURCE_NOTE: Record<string, string> = {
+  filename: "Date guessed from the file name",
+  mtime: "Date taken from the file's modified time — may be wrong",
+  exif: "Time zone unknown",
+};
+
+function formatGap(seconds: number) {
+  const m = Math.abs(seconds) / 60;
+  if (m < 1) return "a few seconds";
+  if (m < 90) return `${Math.round(m)} min`;
+  if (m < 48 * 60) return `${Math.round(m / 60)} h`;
+  return `${Math.round(m / 1440)} days`;
+}
+
+/** The geotagged photo closest in time, as a starting point for placing an untagged one. */
+function nearestTagged(points: Points, i: number): { at: LatLon; label: string } | null {
+  const t = points.t[i]!;
+  if (Number.isNaN(t)) return null;
+  let best = -1;
+  for (const dir of [-1, 1]) {
+    for (let j = i + dir; j >= 0 && j < points.dated; j += dir) {
+      if (Number.isNaN(points.lat[j]!)) continue;
+      if (best < 0 || Math.abs(points.t[j]! - t) < Math.abs(points.t[best]! - t)) best = j;
+      break;
+    }
+  }
+  if (best < 0) return null;
+  const dt = points.t[best]! - t;
+  return {
+    at: { lat: points.lat[best]!, lon: points.lon[best]! },
+    label: `where your photo from ${formatGap(dt)} ${dt < 0 ? "earlier" : "later"} was taken`,
+  };
+}
+
+async function sendLocation(id: number, c: LatLon | null): Promise<PhotoDetail> {
+  const r = await fetch(`/api/photos/${id}/location`, {
+    method: c ? "POST" : "DELETE",
+    headers: c ? { "content-type": "application/json" } : undefined,
+    body: c ? JSON.stringify(c) : undefined,
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "Couldn't save the location");
+  return j;
+}
+
+function formatDuration(s: number) {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
+
+export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOnMap, onLocationChange }: ViewerProps) {
+  const id = ids[index]!;
+  const i = indexOf(id);
+  const isVideo = i != null && points.kind[i] === 2;
+  const [detail, setDetail] = useState<PhotoDetail | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [showInfo, setShowInfo] = useState(() => localStorageGet("pm.info") !== "0");
+  const [editing, setEditing] = useState(false);
+  const hint = useMemo(() => (editing && i != null ? nearestTagged(points, i) : null), [editing, points, i]);
+
+  useEffect(() => {
+    setLoaded(false);
+    setEditing(false);
+    const ac = new AbortController();
+    fetch(`/api/photos/${id}`, { signal: ac.signal })
+      .then((r) => r.json())
+      .then(setDetail)
+      .catch(() => {});
+    // Warm the neighbours.
+    for (const k of [index + 1, index - 1]) {
+      const nid = ids[k];
+      const j = nid != null ? indexOf(nid) : undefined;
+      if (j != null && points.kind[j] !== 2) new Image().src = `/thumbs/l/${nid}`;
+    }
+    return () => ac.abort();
+  }, [id]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Typing coordinates must not flip photos or close the viewer.
+      if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight" && index < ids.length - 1) onIndex(index + 1);
+      else if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
+      else if (e.key === "i") toggleInfo();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const toggleInfo = () =>
+    setShowInfo((v) => {
+      localStorageSet("pm.info", v ? "0" : "1");
+      return !v;
+    });
+
+  const d = detail?.id === id ? detail : null;
+
+  const saveLocation = async (c: LatLon | null) => {
+    const updated = await sendLocation(id, c);
+    setDetail(updated);
+    setEditing(false);
+    onLocationChange();
+  };
+  const removeLocation = () => {
+    if (confirm("Remove the location you added to this photo?")) saveLocation(null).catch((err) => alert(err.message));
+  };
+  // Only locations the file doesn't carry can be added or changed here.
+  const assigned = d?.gps_source == null || d.gps_source === "manual" || d.gps_source.startsWith("inferred:");
+  const settings = d && [d.fnumber && `ƒ/${+d.fnumber.toFixed(1)}`, formatExposure(d.exposure), d.iso && `ISO ${d.iso}`, d.focal && `${+d.focal.toFixed(1)} mm`].filter(Boolean);
+
+  return (
+    <div className="viewer" role="dialog" aria-modal="true">
+      <div className="viewer-stage" onClick={(e) => e.target === e.currentTarget && onClose()}>
+        {isVideo ? (
+          <video key={id} src={`/original/${id}`} poster={`/thumbs/l/${id}`} controls autoPlay playsInline className="viewer-media" />
+        ) : (
+          <>
+            <img key={`s${id}`} src={`/thumbs/s/${id}`} alt="" className="viewer-media viewer-placeholder" aria-hidden />
+            <img
+              key={`l${id}`}
+              src={`/thumbs/l/${id}`}
+              alt={d?.name ?? ""}
+              className={`viewer-media ${loaded ? "is-loaded" : ""}`}
+              onLoad={() => setLoaded(true)}
+            />
+          </>
+        )}
+        <div className="viewer-top">
+          <span className="viewer-pos">
+            {nf.format(index + 1)} / {nf.format(ids.length)}
+          </span>
+          <div className="viewer-top-actions">
+            <button className="btn btn-overlay" onClick={toggleInfo} title="Info (i)">
+              Info
+            </button>
+            <button className="btn btn-overlay" onClick={onClose} title="Close (Esc)" aria-label="Close">
+              ✕
+            </button>
+          </div>
+        </div>
+        {index > 0 && (
+          <button className="viewer-nav viewer-prev" onClick={() => onIndex(index - 1)} aria-label="Previous">
+            ‹
+          </button>
+        )}
+        {index < ids.length - 1 && (
+          <button className="viewer-nav viewer-next" onClick={() => onIndex(index + 1)} aria-label="Next">
+            ›
+          </button>
+        )}
+      </div>
+
+      {showInfo && (
+        <aside className={`viewer-info ${editing ? "is-editing" : ""}`}>
+          {!d ? (
+            <div className="dim">Loading…</div>
+          ) : (
+            <>
+              <section>
+                <h3>{d.taken_local != null ? formatDateTime(d.taken_local) : "Unknown date"}</h3>
+                <div className="dim">
+                  {formatOffset(d.tz_offset)}
+                  {d.time_source && TIME_SOURCE_NOTE[d.time_source] && <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>}
+                </div>
+              </section>
+
+              {editing ? (
+                <section>
+                  <h4>{d.lat != null ? "Change location" : "Add location"}</h4>
+                  <LocationPicker
+                    initial={d.lat != null && d.lon != null ? { lat: d.lat, lon: d.lon } : null}
+                    hint={hint}
+                    onSave={saveLocation}
+                    onCancel={() => setEditing(false)}
+                  />
+                </section>
+              ) : d.lat != null && d.lon != null ? (
+                <section>
+                  <h4>Location</h4>
+                  <div>{d.country ?? "Unknown country"}</div>
+                  {d.gps_source === "manual" && <div className="dim small">Added by you</div>}
+                  {d.gps_source && GPS_SOURCE_NOTE[d.gps_source] && <div className="note">{GPS_SOURCE_NOTE[d.gps_source]}</div>}
+                  <div className="dim mono">
+                    {d.lat.toFixed(5)}, {d.lon.toFixed(5)}
+                    {d.alt != null && ` · ${Math.round(d.alt)} m`}
+                  </div>
+                  <div className="row">
+                    {i != null && (
+                      <button className="btn btn-small" onClick={() => onShowOnMap(i)}>
+                        Show on map
+                      </button>
+                    )}
+                    {assigned && (
+                      <button className="btn btn-small" onClick={() => setEditing(true)}>
+                        Change
+                      </button>
+                    )}
+                    {d.gps_source === "manual" && (
+                      <button className="btn btn-small" onClick={removeLocation}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </section>
+              ) : (
+                <section>
+                  <h4>Location</h4>
+                  <div className="dim">No location data</div>
+                  <button className="btn btn-small" onClick={() => setEditing(true)}>
+                    Add location
+                  </button>
+                </section>
+              )}
+
+              {(d.camera || settings?.length) && (
+                <section>
+                  <h4>Camera</h4>
+                  {d.camera && <div>{d.camera}</div>}
+                  {d.lens && <div className="dim">{d.lens}</div>}
+                  {settings && settings.length > 0 && <div className="dim">{settings.join(" · ")}</div>}
+                </section>
+              )}
+
+              <section>
+                <h4>File</h4>
+                <div className="break">{d.name}</div>
+                <div className="dim">
+                  {[d.width && d.height && `${d.width} × ${d.height}`, formatBytes(d.size), d.duration && formatDuration(d.duration)].filter(Boolean).join(" · ")}
+                </div>
+                <div className="dim break small">{d.path}</div>
+                <div className="row">
+                  <button className="btn btn-small" onClick={() => fetch(`/api/reveal/${id}`, { method: "POST" })}>
+                    Show in Finder
+                  </button>
+                  <a className="btn btn-small" href={`/original/${id}`} target="_blank" rel="noreferrer">
+                    Open original
+                  </a>
+                </div>
+              </section>
+            </>
+          )}
+        </aside>
+      )}
+    </div>
+  );
+}
+
+function localStorageGet(k: string): string | null {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+function localStorageSet(k: string, v: string) {
+  try {
+    localStorage.setItem(k, v);
+  } catch {}
+}
