@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatBytes, formatDateTime, formatExposure, formatOffset, nearestTagged, nf, type Points } from "./data";
+import { formatBytes, formatDate, formatDateTime, formatExposure, formatOffset, formatYear, nearestTagged, nf, type Points } from "./data";
 import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
@@ -53,9 +53,22 @@ const GPS_SOURCE_NOTE: Record<string, string> = {
 
 const TIME_SOURCE_NOTE: Record<string, string> = {
   filename: "Date guessed from the file name",
+  "filename-utc": "Date taken from the timestamp in the file name",
+  gps: "Date from the GPS clock (the camera recorded none)",
+  "gps-date": "Only the day is known, from the GPS data",
+  original: "Date copied from the original of this edited copy",
+  sequence: "Estimated from the photos numbered before and after it",
+  folder: "Only the year is known, from the folder name",
   mtime: "Date taken from the file's modified time — may be wrong",
   exif: "Time zone unknown",
 };
+
+/** Only as precise as the source allows: a year from a folder name isn't "1 Jan, 00:00". */
+function formatTaken(t: number, source: string | null): string {
+  if (source === "folder") return formatYear(t);
+  if (source === "gps-date") return formatDate(t);
+  return formatDateTime(t);
+}
 
 async function sendLocation(id: number, c: LatLon | null): Promise<PhotoDetail> {
   const r = await fetch(`/api/photos/${id}/location`, {
@@ -184,7 +197,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
           ) : (
             <>
               <section>
-                <h3>{d.taken_local != null ? formatDateTime(d.taken_local) : "Unknown date"}</h3>
+                <h3>{d.taken_local != null ? formatTaken(d.taken_local, d.time_source) : "Unknown date"}</h3>
                 <div className="dim">
                   {formatOffset(d.tz_offset)}
                   {d.time_source && TIME_SOURCE_NOTE[d.time_source] && <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>}

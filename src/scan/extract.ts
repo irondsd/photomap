@@ -1,7 +1,7 @@
 import exifr from "exifr";
 import { iso1A2Code, feature } from "@rapideditor/country-coder";
 import type { Kind } from "../config";
-import { resolveTime, type TimeInput } from "./datetime";
+import { parseDateString, resolveTime, type TimeInput } from "./datetime";
 
 export interface Extracted {
   taken_local: number | null;
@@ -108,6 +108,28 @@ const EMPTY = {
   error: null,
 } satisfies Partial<Extracted>;
 
+const hasCameraDate = (e: Record<string, unknown> | undefined) =>
+  !!e && [e.DateTimeOriginal, e.CreateDate, e.ModifyDate].some((v) => typeof v === "string" && parseDateString(v));
+
+/**
+ * Some editors (Windows Photo Gallery, Lightroom, Photoshop) keep the date taken only in
+ * XMP. Read as a second pass, only for files without a camera date. Modify dates are
+ * ignored here: in XMP they're usually when the file was edited.
+ */
+async function xmpDates(path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const x = await exifr.parse(path, {
+      tiff: false, exif: false, gps: false, ifd1: false, interop: false,
+      xmp: true, iptc: true, mergeOutput: true, reviveValues: false,
+    });
+    const DateTimeOriginal = x?.DateTimeOriginal ?? x?.DateCreated;
+    const CreateDate = x?.CreateDate;
+    return DateTimeOriginal || CreateDate ? { DateTimeOriginal, CreateDate } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function extractImage(path: string, name: string, mtimeMs: number): Promise<Extracted> {
   let e: Record<string, unknown> | undefined;
   let error: string | null = null;
@@ -116,7 +138,8 @@ async function extractImage(path: string, name: string, mtimeMs: number): Promis
   } catch (err) {
     error = String((err as Error)?.message ?? err).slice(0, 200);
   }
-  if (!e) return finish({ ...EMPTY, error }, { name, mtimeMs });
+  const xmp = hasCameraDate(e) ? undefined : await xmpDates(path);
+  if (!e) return finish({ ...EMPTY, error }, { name, mtimeMs, exif: xmp });
 
   const gpsOk = validCoords(e.latitude, e.longitude);
   const w = num(e.ExifImageWidth) ?? num(e.ImageWidth) ?? num(e.PixelXDimension);
@@ -143,7 +166,7 @@ async function extractImage(path: string, name: string, mtimeMs: number): Promis
       focal: num(e.FocalLength),
       error,
     },
-    { name, mtimeMs, exif: e },
+    { name, mtimeMs, exif: xmp ? { ...e, ...xmp } : e },
   );
 }
 

@@ -35,15 +35,15 @@ export function setLocation(id: number, loc: { lat: number; lon: number; source:
   setStmt.run(loc?.lat ?? null, loc?.lon ?? null, loc?.source ?? null, c.code, c.name, time.local, time.offset, time.source, id);
 }
 
-/** Re-applies a manual location to freshly extracted metadata of a file that changed on disk. */
-export function keepManualLocation(meta: Extracted, lat: number, lon: number): Extracted {
+/** Re-applies an assigned location (manual by default) to freshly extracted metadata. */
+export function keepAssignedLocation(meta: Extracted, lat: number, lon: number, source: AssignedSource = "manual"): Extracted {
   let time = { taken_local: meta.taken_local, tz_offset: meta.tz_offset, time_source: meta.time_source };
   if (meta.taken_local != null && meta.time_source) {
     const t = relocalize({ local: meta.taken_local, offset: meta.tz_offset, source: meta.time_source as TimeSource }, lat, lon);
     time = { taken_local: t.local, tz_offset: t.offset, time_source: t.source };
   }
   const c = countryAt(lat, lon);
-  return { ...meta, ...time, lat, lon, alt: null, gps_source: "manual", country_code: c.code, country: c.name };
+  return { ...meta, ...time, lat, lon, alt: null, gps_source: source, country_code: c.code, country: c.name };
 }
 
 const restoreStmt = db.prepare(

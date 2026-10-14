@@ -15,7 +15,11 @@ export interface Points {
   countries: string[];
   /** Where the location came from; see SOURCE. */
   source: Uint8Array;
+  /** How far the date can be trusted; see PRECISION. */
+  precision: Uint8Array;
 }
+
+export const PRECISION = { exact: 0, estimated: 1, year: 2, unknown: 3 } as const;
 
 export const SOURCE = { none: 0, file: 1, inferred: 2, manual: 3 } as const;
 
@@ -42,9 +46,10 @@ export async function loadPoints(): Promise<Points> {
   const country = col(Uint16Array, 2);
   const kind = col(Uint8Array, 1);
   const source = col(Uint8Array, 1);
+  const precision = col(Uint8Array, 1);
   let dated = n;
   while (dated > 0 && Number.isNaN(t[dated - 1]!)) dated--;
-  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source };
+  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source, precision };
 }
 
 /** First index with t >= x, within the dated prefix. */

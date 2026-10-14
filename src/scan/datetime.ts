@@ -16,10 +16,17 @@ export type TimeSource =
   | "exif+gps" // offset derived from the GPS UTC timestamp
   | "exif+geotz" // offset from the time zone at the GPS position
   | "exif" // wall time only, offset unknown
+  | "gps" // no camera date, but the GPS clock (UTC) recorded one
+  | "gps-date" // only the GPS date is usable (some HTC phones write garbage times)
   | "video+offset"
   | "video"
-  | "filename"
-  | "mtime";
+  | "filename" // a wall-clock date in the name (IMG_20190612_142201)
+  | "filename-utc" // a millisecond timestamp in the name (FB_IMG_1501315576710)
+  | "mtime"
+  // Set after scanning, from other files in the same folder (see dates.ts):
+  | "original" // copied from the unedited original next to an edited copy
+  | "sequence" // estimated from the files numbered before and after it
+  | "folder"; // only the year, from the folder name
 
 const MIN_YEAR = 1826;
 const maxYear = () => new Date().getUTCFullYear() + 1;
@@ -58,12 +65,8 @@ export function parseDateString(s: string | undefined | null): { wall: number; o
 
 /** Offset implied by comparing local EXIF time with the GPS (UTC) timestamp, rounded to 15 min. */
 export function offsetFromGps(wall: number, gpsDate: unknown, gpsTime: unknown): number | null {
-  if (typeof gpsDate !== "string" || !Array.isArray(gpsTime) || gpsTime.length < 3) return null;
-  const dm = /^(\d{4})[:\-](\d{2})[:\-](\d{2})/.exec(gpsDate);
-  if (!dm) return null;
-  const [h, mi, s] = gpsTime.map(Number) as [number, number, number];
-  if (![h, mi, s].every(Number.isFinite)) return null;
-  const utc = Date.UTC(+dm[1]!, +dm[2]! - 1, +dm[3]!, 0, 0, 0) / 1000 + h * 3600 + mi * 60 + s;
+  const utc = gpsInstant(gpsDate, gpsTime);
+  if (utc == null) return null;
   const diffMin = (wall - utc) / 60;
   const rounded = Math.round(diffMin / 15) * 15;
   // GPS fixes can lag the shutter by a few minutes; anything wildly off is junk.
@@ -126,6 +129,30 @@ export function dateFromFilename(name: string): number | null {
   return null;
 }
 
+/**
+ * Apps like Facebook and FaceApp name saved images after the moment they were saved,
+ * in milliseconds: FB_IMG_1501315576710.jpg. Returns UTC seconds.
+ */
+export function epochFromFilename(name: string): number | null {
+  const m = /(?<!\d)(1\d{12})/.exec(name);
+  if (!m) return null;
+  const ms = Number(m[1]);
+  const year = new Date(ms).getUTCFullYear();
+  // Before 2004 a 13-digit number is more likely an id than a timestamp.
+  return year >= 2004 && year <= maxYear() ? Math.floor(ms / 1000) : null;
+}
+
+/** "2019:06:12" + [h, m, s] from the GPS block → UTC seconds. */
+export function gpsInstant(gpsDate: unknown, gpsTime: unknown): number | null {
+  if (typeof gpsDate !== "string" || !Array.isArray(gpsTime) || gpsTime.length < 3) return null;
+  const dm = /^(\d{4})[:\-](\d{2})[:\-](\d{2})/.exec(gpsDate);
+  if (!dm) return null;
+  const [h, mi, s] = gpsTime.map(Number) as [number, number, number];
+  const day = validWall(+dm[1]!, +dm[2]!, +dm[3]!, 0, 0, 0);
+  if (day == null || ![h, mi, s].every((x) => Number.isFinite(x) && x >= 0) || h > 23 || mi > 59 || s >= 61) return null;
+  return day + h * 3600 + mi * 60 + Math.floor(s);
+}
+
 export interface TimeInput {
   exif?: {
     DateTimeOriginal?: unknown;
@@ -176,6 +203,17 @@ export function resolveTime(i: TimeInput): TimeResult | null {
       if (geo != null) return { local: wall, offset: geo, source: "exif+geotz" };
       return { local: wall, offset: null, source: "exif" };
     }
+    // No camera date, but GPS fixes carry their own UTC clock.
+    const gps = gpsInstant(e.GPSDateStamp, e.GPSTimeStamp);
+    if (gps != null && gps > Date.UTC(1990, 0, 1) / 1000) {
+      const off = geoOffset(i.lat, i.lon, gps) ?? localOffsetAtInstant(gps * 1000);
+      return { local: gps + off * 60, offset: off, source: "gps" };
+    }
+    const day = typeof e.GPSDateStamp === "string" ? parseDateString(`${e.GPSDateStamp} 12:00:00`) : null;
+    if (day && day.wall > Date.UTC(1990, 0, 1) / 1000) {
+      // Noon, so the unknown time zone can't move it to another day.
+      return { local: day.wall, offset: geoOffset(i.lat, i.lon, day.wall), source: "gps-date" };
+    }
   }
 
   const v = i.video;
@@ -198,6 +236,11 @@ export function resolveTime(i: TimeInput): TimeResult | null {
 
   const fn = dateFromFilename(i.name);
   if (fn != null) return { local: fn, offset: null, source: "filename" };
+  const epoch = epochFromFilename(i.name);
+  if (epoch != null) {
+    const off = geoOffset(i.lat, i.lon, epoch) ?? localOffsetAtInstant(epoch * 1000);
+    return { local: epoch + off * 60, offset: off, source: "filename-utc" };
+  }
 
   if (Number.isFinite(i.mtimeMs) && i.mtimeMs > 0) {
     const utc = Math.floor(i.mtimeMs / 1000);
@@ -215,7 +258,7 @@ export function resolveTime(i: TimeInput): TimeResult | null {
  * Everything else already knows its offset or can't be improved.
  */
 export function relocalize(t: TimeResult, lat: number | null, lon: number | null): TimeResult {
-  const instantBased = (t.source === "video" || t.source === "mtime") && t.offset != null;
+  const instantBased = (t.source === "video" || t.source === "mtime" || t.source === "gps" || t.source === "filename-utc") && t.offset != null;
   if (instantBased) {
     const utc = t.local - t.offset! * 60;
     const off = geoOffset(lat, lon, utc) ?? localOffsetAtInstant(utc * 1000);

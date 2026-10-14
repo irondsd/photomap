@@ -53,15 +53,24 @@ function sourceCode(gps: string | null): number {
  *   u32 count, u32 jsonBytes | JSON country names, padded to 8 bytes
  *   | f64 t[n] | f32 lat[n] | f32 lon[n] | f32 aspect[n] | u32 id[n]
  *   | u16 country[n] (0 = none, else 1 + index into the names) | u8 kind[n] | u8 source[n]
- * Missing time/coords/aspect are NaN. ~29 bytes per photo.
+ *   | u8 datePrecision[n] (0 exact, 1 estimated, 2 year only, 3 unknown)
+ * Missing time/coords/aspect are NaN. ~30 bytes per photo.
  */
+/** How far a photo's date can be trusted, from its time source. */
+function datePrecision(ts: string | null): number {
+  if (ts === 'mtime' || ts == null) return 3
+  if (ts === 'folder') return 2
+  if (ts === 'sequence' || ts === 'gps-date') return 1
+  return 0
+}
+
 function encodePoints(): ArrayBuffer {
   const rows = db
     .query<
-      { id: number; t: number | null; lat: number | null; lon: number | null; kind: string; w: number | null; h: number | null; country: string | null; gps: string | null },
+      { id: number; t: number | null; lat: number | null; lon: number | null; kind: string; w: number | null; h: number | null; country: string | null; gps: string | null; ts: string | null },
       []
     >(
-      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps FROM photos WHERE missing = 0
+      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps, time_source ts FROM photos WHERE missing = 0
        ORDER BY taken_local IS NULL, taken_local, id`,
     )
     .all()
@@ -76,7 +85,7 @@ function encodePoints(): ArrayBuffer {
   }
   const json = new TextEncoder().encode(JSON.stringify(countries))
   const head = 8 + Math.ceil(json.length / 8) * 8
-  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1))
+  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1 + 1))
   new Uint32Array(buf, 0, 2).set([n, json.length])
   new Uint8Array(buf, 8, json.length).set(json)
   let off = head
@@ -93,6 +102,7 @@ function encodePoints(): ArrayBuffer {
   const country = col(Uint16Array, 2)
   const kind = col(Uint8Array, 1)
   const source = col(Uint8Array, 1)
+  const precision = col(Uint8Array, 1)
   for (let i = 0; i < n; i++) {
     const r = rows[i]!
     t[i] = r.t ?? NaN
@@ -103,6 +113,7 @@ function encodePoints(): ArrayBuffer {
     country[i] = r.country ? countryIndex.get(r.country)! : 0
     kind[i] = KIND_CODE[r.kind] ?? 0
     source[i] = sourceCode(r.gps)
+    precision[i] = datePrecision(r.ts)
   }
   return buf
 }

@@ -19,6 +19,7 @@ function points(items: [number, number, number?][]): Points {
     country: Uint16Array.from(sorted.map(([, , c]) => c ?? 0)),
     countries: ["Russia", "Georgia"],
     source: new Uint8Array(n),
+    precision: new Uint8Array(n),
   };
 }
 
@@ -29,9 +30,23 @@ describe("buildLayout", () => {
   test("groups by day, newest first, undated last", () => {
     const p = points([[10 * DAY + 100, 1], [12 * DAY + 50, 1], [12 * DAY + 900, 1], [NaN, 1]]);
     const l = buildLayout(p, galleryOrder(p, 7), W);
-    expect(l.groups.map((g) => [g.end - g.start, g.label === "No date"])).toEqual([[2, false], [1, false], [1, true]]);
+    expect(l.groups.map((g) => [g.end - g.start, g.label === "Date unknown"])).toEqual([[2, false], [1, false], [1, true]]);
     // Newest photo of the newest day comes first.
     expect(p.t[l.order[0]!]).toBe(12 * DAY + 900);
+  });
+
+  test("year-only photos get their own group; dates that are only the file time go last", () => {
+    const jan1 = Date.UTC(2012, 0, 1) / 1000;
+    const p = points([[jan1 + 9 * 3600, 1], [jan1, 1], [jan1 + 1, 1], [Date.UTC(2026, 9, 12) / 1000, 1]]);
+    // Index order is by time: [jan1 (year-only), jan1+1 (year-only), jan1+9h (real), 2026 (file time)].
+    p.precision.set([2, 2, 0, 3]);
+    const l = buildLayout(p, galleryOrder(p, 7), W);
+    // The day's own label depends on the machine's locale; the others don't.
+    expect(l.groups.map((g) => [g.label.includes("unknown") ? g.label : "day", g.end - g.start])).toEqual([
+      ["day", 1],
+      ["2012 · Date unknown", 2],
+      ["Date unknown", 1],
+    ]);
   });
 
   test("full rows fill the width exactly", () => {

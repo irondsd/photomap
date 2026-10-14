@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { parseDateString, parseOffset, offsetFromGps, dateFromFilename, resolveTime, zoneOffsetAtWall, relocalize } from "./datetime";
+import { parseDateString, parseOffset, offsetFromGps, dateFromFilename, epochFromFilename, resolveTime, zoneOffsetAtWall, relocalize } from "./datetime";
 
 const wall = (s: string) => Date.parse(s + "Z") / 1000;
 
@@ -102,4 +102,37 @@ describe("relocalize", () => {
     const t = { local: wall("2019-07-14T15:00:00"), offset: 180, source: "exif+offset" as const };
     expect(relocalize(t, -33.8568, 151.2153)).toEqual(t);
   });
+});
+
+describe("dates without a camera clock", () => {
+  test("millisecond timestamps in file names", () => {
+    expect(epochFromFilename("FB_IMG_1501315576710.jpg")).toBe(1501315576);
+    expect(epochFromFilename("FaceApp_1587812345678.jpg")).toBe(1587812345);
+    // Facebook sometimes appends more digits.
+    expect(epochFromFilename("FB_IMG_15092431064951829.jpg")).toBe(1509243106);
+    expect(epochFromFilename("IMG_2586.JPG")).toBeNull();
+    expect(epochFromFilename("1000000000000.jpg")).toBeNull(); // 2001: more likely an id
+  });
+
+  test("GPS clock is used when there's no camera date", () => {
+    // 12:00:00 UTC in Paris in July = 14:00 local (UTC+2).
+    const r = resolveTime({ name: "x.jpg", mtimeMs: 0, lat: 48.8584, lon: 2.2945, exif: { GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] } });
+    expect(r).toEqual({ local: wall("2019-07-14T14:00:00"), offset: 120, source: "gps" });
+  });
+
+  test("a camera date still wins over the GPS clock", () => {
+    const r = resolveTime({ name: "x.jpg", mtimeMs: 0, exif: { DateTimeOriginal: "2019:07:14 14:00:05", GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] } });
+    expect(r?.source).toBe("exif+gps");
+  });
+
+  test("filename timestamp beats the file's modified time", () => {
+    const r = resolveTime({ name: "FB_IMG_1501315576710.jpg", mtimeMs: Date.parse("2026-10-12T00:00:00Z"), lat: 48.8584, lon: 2.2945 });
+    expect(r).toEqual({ local: 1501315576 + 120 * 60, offset: 120, source: "filename-utc" });
+  });
+});
+
+test("a GPS date with a garbage time still gives the day", () => {
+  // HTC Desire S: the time field holds a copy of the longitude.
+  const r = resolveTime({ name: "IMAG0178-edited.jpg", mtimeMs: 0, lat: 56.84, lon: 35.91, exif: { GPSDateStamp: "2012:08:07", GPSTimeStamp: [35, 54, 50.43] } });
+  expect(r).toEqual({ local: wall("2012-08-07T12:00:00"), offset: 240, source: "gps-date" });
 });

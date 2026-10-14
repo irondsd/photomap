@@ -3,7 +3,9 @@ import { join, relative, dirname, extname, basename } from "node:path";
 import { CPUS, kindOf, skipDir, type Kind } from "../config";
 import { db, knownFiles, markMissing, nextScanGen, setRootScanned, touchPhoto, upsertPhoto, type PhotoInsert, type RootRow } from "../db";
 import { extract } from "./extract";
-import { keepManualLocation } from "./locate";
+import { keepAssignedLocation } from "./locate";
+import { applyDateInference } from "./fixDates";
+import { INFERRED_DATE_SOURCES } from "./dates";
 
 export interface ScanStatus {
   running: boolean;
@@ -131,7 +133,10 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
         const st = await stat(c.path);
         const mtime = Math.round(st.mtimeMs);
         const prev = known.get(c.path);
-        if (prev && prev.size === st.size && prev.mtime === mtime) {
+        // Unchanged files are skipped, except those still without a real date: newer
+        // versions of the extractor may find one (XMP, GPS clock, name timestamps).
+        const undated = prev != null && INFERRED_DATE_SOURCES.has(prev.time_source ?? "mtime");
+        if (prev && prev.size === st.size && prev.mtime === mtime && !undated) {
           pendingTouches.push(prev.id);
           status.unchanged++;
         } else {
@@ -140,7 +145,10 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
           let meta = c.kind === "video" ? await videoSlots.run(run) : await run();
           // A location set by hand wins over the file's own GPS, and survives the file changing.
           if (prev?.gps_source === "manual" && prev.lat != null && prev.lon != null) {
-            meta = keepManualLocation(meta, prev.lat, prev.lon);
+            meta = keepAssignedLocation(meta, prev.lat, prev.lon);
+          } else if (undated && prev?.gps_source?.startsWith("inferred:") && meta.lat == null && prev.lat != null && prev.lon != null) {
+            // Re-read only for its date: keep the backfill's estimate.
+            meta = keepAssignedLocation(meta, prev.lat, prev.lon, prev.gps_source as `inferred:${string}`);
           }
           if (meta.error) status.errors++;
           pendingUpserts.push({
@@ -155,7 +163,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
             scan_gen: gen,
             ...meta,
           });
-          if (prev) status.updated++;
+          if (prev && prev.size === st.size && prev.mtime === mtime) status.unchanged++; // only re-read for a date
+          else if (prev) status.updated++;
           else status.added++;
         }
       } catch {
@@ -175,6 +184,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
       status.phase = "cancelled";
     } else {
       status.removed = markMissing(root.id, gen, subdir ?? undefined);
+      // Dates from neighbouring files, for photos whose own metadata has none.
+      applyDateInference();
       if (!subdir) setRootScanned(root.id);
       status.phase = "done";
     }

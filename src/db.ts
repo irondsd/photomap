@@ -176,6 +176,7 @@ export interface KnownFile {
   lat: number | null
   lon: number | null
   gps_source: string | null
+  time_source: string | null
 }
 
 export function knownFiles(rootId: number): Map<string, KnownFile> {
@@ -183,7 +184,7 @@ export function knownFiles(rootId: number): Map<string, KnownFile> {
     .query<
       KnownFile & { path: string },
       [number]
-    >(`SELECT id, path, size, mtime, lat, lon, gps_source FROM photos WHERE root_id = ?`)
+    >(`SELECT id, path, size, mtime, lat, lon, gps_source, time_source FROM photos WHERE root_id = ?`)
     .all(rootId)
   return new Map<string, KnownFile>(rows.map((r): [string, KnownFile] => [r.path, r]))
 }

@@ -11,6 +11,7 @@ import { db } from '../db'
 import { countryAt } from './extract'
 import { infer, type BackfillPhoto, type Confidence, type Proposal } from './backfill'
 import { setLocation } from './locate'
+import { VAGUE_DATE_SOURCES } from './dates'
 
 const args = process.argv.slice(2)
 const undo = args.includes('--undo')
@@ -51,11 +52,12 @@ const rows: Row[] = db
      FROM photos WHERE missing = 0`,
   )
   .all()
-// Previous inferences are recomputed, never used as evidence. A file's modified time is
-// when it was copied or exported, not when it was taken, so those photos count as undated.
+// Previous inferences are recomputed, never used as evidence. Vague dates (the file's
+// modified time, a year from the folder, an estimate from numbered neighbours, a day
+// without a time) can't line photos up within minutes, so those photos count as undated.
 const photos: BackfillPhoto[] = rows
   .map((r) => (r.inferred ? { ...r, lat: null, lon: null } : r))
-  .map((r) => ({ ...r, t: r.t != null && r.timeSource !== 'mtime' ? r.t : NaN }))
+  .map((r) => ({ ...r, t: r.t != null && !VAGUE_DATE_SOURCES.has(r.timeSource ?? '') ? r.t : NaN }))
 const byId = new Map<number, Row>(rows.map((r): [number, Row] => [r.id, r]))
 
 const { proposals, skipped, homes } = infer(photos)
@@ -99,7 +101,7 @@ const REASON = {
   moving: 'moving: places before and after differ',
   'neighbours-far-in-time': 'nearest GPS photos too far away in time',
   'no-neighbours': 'no GPS photos at all',
-  undated: 'no reliable date (none, or only the file modified time)',
+  undated: 'no precise date (none, or only an estimate, the year or the day)',
 } as const
 console.log(`\nLeft for manual review: ${skipped.length}`)
 for (const [reason, label] of Object.entries(REASON)) {

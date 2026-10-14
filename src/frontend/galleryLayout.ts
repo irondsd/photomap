@@ -1,5 +1,5 @@
 import type { Points } from "./data";
-import { formatDayHeader } from "./data";
+import { formatDayHeader, formatYear, PRECISION } from "./data";
 
 export const GAP = 4;
 export const HEADER_H = 48;
@@ -15,7 +15,7 @@ export interface Group {
   /** Tile range [start, end) in layout order. */
   start: number;
   end: number;
-  /** Wall-clock time of the day's first (newest) photo; NaN for the undated group. */
+  /** Wall-clock time of the day's first (newest) photo; NaN for the "Date unknown" group. */
   t: number;
   label: string;
   places: string;
@@ -39,14 +39,27 @@ export function rowHeightFor(width: number): number {
 }
 
 const dayOf = (t: number) => Math.floor(t / 86400);
+const dateless = (p: Points, i: number) => Number.isNaN(p.t[i]!) || p.precision[i] === PRECISION.unknown;
 
-/** Display order: newest first among dated photos, then undated ones. */
+/**
+ * Which header a photo goes under: its day; "2012 · Date unknown" when only the year is
+ * known; or the "Date unknown" group at the very end.
+ */
+function groupKey(p: Points, i: number): string {
+  if (dateless(p, i)) return "none";
+  const t = p.t[i]!;
+  return p.precision[i] === PRECISION.year ? `y${formatYear(t)}` : `d${dayOf(t)}`;
+}
+
+/** Display order: newest first, then photos without a usable date. */
 export function galleryOrder(p: Points, kinds: number): Int32Array {
   const out: number[] = [];
-  const keep = (i: number) => ((1 << p.kind[i]!) & kinds) !== 0;
-  for (let i = p.dated - 1; i >= 0; i--) if (keep(i)) out.push(i);
-  for (let i = p.dated; i < p.n; i++) if (keep(i)) out.push(i);
-  return Int32Array.from(out);
+  const tail: number[] = [];
+  for (let i = p.n - 1; i >= 0; i--) {
+    if (!((1 << p.kind[i]!) & kinds)) continue;
+    (dateless(p, i) ? tail : out).push(i);
+  }
+  return Int32Array.from([...out, ...tail.reverse()]);
 }
 
 /**
@@ -66,16 +79,12 @@ export function buildLayout(p: Points, order: Int32Array, width: number, left = 
 
   let k = 0;
   while (k < n) {
-    // One day (or the undated tail).
+    // One day, one year of year-only photos, or the dateless tail.
     const first = order[k]!;
-    const t0 = p.t[first]!;
-    const day = Number.isNaN(t0) ? NaN : dayOf(t0);
-    let end = k;
-    while (end < n) {
-      const t = p.t[order[end]!]!;
-      if (Number.isNaN(day) ? !Number.isNaN(t) : Number.isNaN(t) || dayOf(t) !== day) break;
-      end++;
-    }
+    const key = groupKey(p, first);
+    const t0 = key === "none" ? NaN : p.t[first]!;
+    let end = k + 1;
+    while (end < n && groupKey(p, order[end]!) === key) end++;
 
     // Most photographed countries that day.
     const counts = new Map<number, number>();
@@ -91,7 +100,8 @@ export function buildLayout(p: Points, order: Int32Array, width: number, left = 
 
     if (groups.length) top += GROUP_GAP;
     const gi = groups.length;
-    groups.push({ y: top, start: k, end, t: t0, label: Number.isNaN(t0) ? "No date" : formatDayHeader(t0), places });
+    const label = key === "none" ? "Date unknown" : key[0] === "y" ? `${key.slice(1)} · Date unknown` : formatDayHeader(t0);
+    groups.push({ y: top, start: k, end, t: t0, label, places });
     top += HEADER_H;
 
     // Rows within the day.
