@@ -57,6 +57,7 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       mapRef.current = null;
       pin.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once; later changes go through the effects below.
   }, []);
 
   // Keep the draggable pin in sync with the chosen position.

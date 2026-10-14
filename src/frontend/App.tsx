@@ -110,7 +110,9 @@ export function App() {
     else setMapMounted(true);
     try {
       localStorage.setItem("pm.view", m);
-    } catch {}
+    } catch {
+      // Storage can be unavailable (private mode, blocked); the view just won't be remembered.
+    }
   }, []);
   const [points, setPoints] = useState<Points | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -184,10 +186,12 @@ export function App() {
     if (!points) return;
     clientRef.current!.load(points);
     clientRef.current!.filter(selection, kinds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the effect below re-filters on selection/kind changes.
   }, [points]);
 
   useEffect(() => {
     if (points) clientRef.current!.filter(selection, kinds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- new points are loaded and filtered above.
   }, [selection, kinds]);
 
   const onView = useCallback((bbox: BBox, zoom: number) => {
@@ -227,7 +231,7 @@ export function App() {
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  }, [setMode]);
 
   useEffect(() => {
     const id = setTimeout(() => writeHash(mode, mapRef.current, selection), 300);
@@ -292,7 +296,7 @@ export function App() {
       setHover(i);
       setTimeout(() => setHover((h) => (h === i ? null : h)), 3500);
     },
-    [points],
+    [points, setMode],
   );
 
   useEffect(() => {
@@ -309,7 +313,11 @@ export function App() {
   useEffect(() => {
     if (isEmpty && mode === "gallery") setMode("map");
   }, [isEmpty, mode, setMode]);
-  const initialBounds = useMemo(() => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null), [points !== null]);
+  const initialBounds = useMemo(
+    () => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first load positions the map.
+    [points !== null],
+  );
 
   return (
     <div className="app">

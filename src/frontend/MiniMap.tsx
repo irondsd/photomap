@@ -30,6 +30,7 @@ export function MiniMap({ lat, lon }: { lat: number; lon: number }) {
       m.remove();
       map.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once; the effect below follows lat/lon.
   }, []);
 
   useEffect(() => {

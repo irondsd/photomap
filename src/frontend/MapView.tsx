@@ -67,6 +67,7 @@ export function MapView(props: MapViewProps) {
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new ScaleControl({ maxWidth: 100 }), "bottom-left");
     mapRef.current = map;
+    const entries = markers.current;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = 0;
@@ -93,8 +94,9 @@ export function MapView(props: MapViewProps) {
       if (timer) clearTimeout(timer);
       map.remove();
       mapRef.current = null;
-      markers.current.clear();
+      entries.clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once; theme changes go through setStyle below.
   }, []);
 
   // Theme switch.
@@ -106,7 +108,7 @@ export function MapView(props: MapViewProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const { points } = props;
+    const points = props.points;
     const next = new Set<string>();
     for (const c of props.clusters) {
       const key = c.cid >= 0 ? `c${c.cid}` : `p${c.rep}`;

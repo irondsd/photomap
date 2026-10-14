@@ -141,9 +141,9 @@ const upsertStmt = db.prepare(
 )
 
 export function upsertPhoto(p: PhotoInsert) {
-  const params: Record<string, unknown> = { $indexed_at: Date.now() }
+  const params: Record<string, string | number | null> = { $indexed_at: Date.now() }
   for (const c of PHOTO_COLS) params['$' + c] = p[c] ?? null
-  upsertStmt.run(params as any)
+  upsertStmt.run(params)
 }
 
 const touchStmt = db.prepare<void, [number, number]>(`UPDATE photos SET scan_gen = ?, missing = 0 WHERE id = ?`)

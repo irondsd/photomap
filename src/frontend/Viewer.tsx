@@ -112,6 +112,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
       if (j != null && points.kind[j] !== 2) new Image().src = `/thumbs/l/${nid}`;
     }
     return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per photo, not when the list around it changes.
   }, [id]);
 
   useEffect(() => {
@@ -303,5 +304,7 @@ function localStorageGet(k: string): string | null {
 function localStorageSet(k: string, v: string) {
   try {
     localStorage.setItem(k, v);
-  } catch {}
+  } catch {
+    // Storage can be unavailable (private mode, blocked); the setting just won't be remembered.
+  }
 }

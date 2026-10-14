@@ -169,7 +169,7 @@ export function Timeline(props: TimelineProps) {
 
   const clampView = useCallback(
     (v: Range): Range => {
-      let s = Math.min(Math.max(v[1] - v[0], MIN_SPAN), maxSpan);
+      const s = Math.min(Math.max(v[1] - v[0], MIN_SPAN), maxSpan);
       let a = v[0] + (v[1] - v[0] - s) / 2;
       const lo = extent[0] - s * 0.5;
       const hi = extent[1] + s * 0.5;

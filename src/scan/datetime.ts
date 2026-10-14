@@ -59,7 +59,7 @@ export function parseOffset(s: string | undefined | null): number | null {
  */
 export function parseDateString(s: string | undefined | null): { wall: number; offset: number | null } | null {
   if (typeof s !== "string") return null;
-  const m = /^\s*(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(s);
+  const m = /^\s*(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(s);
   if (!m) return null;
   const wall = validWall(+m[1]!, +m[2]!, +m[3]!, +m[4]!, +m[5]!, +(m[6] ?? 0));
   if (wall == null) return null;
@@ -151,7 +151,7 @@ export function epochFromFilename(name: string): number | null {
 /** "2019:06:12" + [h, m, s] from the GPS block → UTC seconds. */
 export function gpsInstant(gpsDate: unknown, gpsTime: unknown): number | null {
   if (typeof gpsDate !== "string" || !Array.isArray(gpsTime) || gpsTime.length < 3) return null;
-  const dm = /^(\d{4})[:\-](\d{2})[:\-](\d{2})/.exec(gpsDate);
+  const dm = /^(\d{4})[:-](\d{2})[:-](\d{2})/.exec(gpsDate);
   if (!dm) return null;
   const [h, mi, s] = gpsTime.map(Number) as [number, number, number];
   const day = validWall(+dm[1]!, +dm[2]!, +dm[3]!, 0, 0, 0);
