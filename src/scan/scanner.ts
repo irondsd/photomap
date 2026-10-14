@@ -1,11 +1,17 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative, dirname, extname, basename } from "node:path";
 import { CPUS, kindOf, skipDir, type Kind } from "../config";
-import { db, knownFiles, markMissing, nextScanGen, setRootScanned, touchPhoto, upsertPhoto, type PhotoInsert, type RootRow } from "../db";
+import { db, getMeta, setMeta, knownFiles, markMissing, nextScanGen, setRootScanned, touchPhoto, upsertPhoto, type PhotoInsert, type RootRow } from "../db";
 import { extract } from "./extract";
 import { keepAssignedLocation } from "./locate";
 import { applyDateInference } from "./fixDates";
 import { INFERRED_DATE_SOURCES } from "./dates";
+
+/**
+ * Bump when extraction can find something it couldn't before (2: XMP dates, GPS clock,
+ * file name timestamps, the Picasa placeholder date). The next scan re-reads every file once.
+ */
+const EXTRACTOR_VERSION = 2;
 
 export interface ScanStatus {
   running: boolean;
@@ -108,6 +114,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
   try {
     const gen = nextScanGen();
     const known = knownFiles(root.id);
+    // When the extractor learns to read more (new date sources), every file is read again once.
+    const reread = Number(getMeta(`extractor:${root.id}`) ?? 0) < EXTRACTOR_VERSION;
     const candidates = await walk(subdir ?? root.path, (n) => {
       status.found = n;
       report();
@@ -133,10 +141,10 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
         const st = await stat(c.path);
         const mtime = Math.round(st.mtimeMs);
         const prev = known.get(c.path);
-        // Unchanged files are skipped, except those still without a real date: newer
-        // versions of the extractor may find one (XMP, GPS clock, name timestamps).
+        // Unchanged files are skipped, except those still without a real date (a newer
+        // extractor may find one) and everything after the extractor itself was improved.
         const undated = prev != null && INFERRED_DATE_SOURCES.has(prev.time_source ?? "mtime");
-        if (prev && prev.size === st.size && prev.mtime === mtime && !undated) {
+        if (prev && prev.size === st.size && prev.mtime === mtime && !undated && !reread) {
           pendingTouches.push(prev.id);
           status.unchanged++;
         } else {
@@ -146,8 +154,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
           // A location set by hand wins over the file's own GPS, and survives the file changing.
           if (prev?.gps_source === "manual" && prev.lat != null && prev.lon != null) {
             meta = keepAssignedLocation(meta, prev.lat, prev.lon);
-          } else if (undated && prev?.gps_source?.startsWith("inferred:") && meta.lat == null && prev.lat != null && prev.lon != null) {
-            // Re-read only for its date: keep the backfill's estimate.
+          } else if (prev?.gps_source?.startsWith("inferred:") && meta.lat == null && prev.lat != null && prev.lon != null) {
+            // Still no GPS in the file: keep the backfill's estimate (the next backfill run refreshes it).
             meta = keepAssignedLocation(meta, prev.lat, prev.lon, prev.gps_source as `inferred:${string}`);
           }
           if (meta.error) status.errors++;
@@ -185,8 +193,11 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
     } else {
       status.removed = markMissing(root.id, gen, subdir ?? undefined);
       // Dates from neighbouring files, for photos whose own metadata has none.
-      applyDateInference();
-      if (!subdir) setRootScanned(root.id);
+      await applyDateInference();
+      if (!subdir) {
+        setRootScanned(root.id);
+        setMeta(`extractor:${root.id}`, String(EXTRACTOR_VERSION));
+      }
       status.phase = "done";
     }
   } catch (err) {

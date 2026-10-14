@@ -58,6 +58,7 @@ const TIME_SOURCE_NOTE: Record<string, string> = {
   "gps-date": "Only the day is known, from the GPS data",
   original: "Date copied from the original of this edited copy",
   sequence: "Estimated from the photos numbered before and after it",
+  edited: "Estimated from when it was edited — the photo was taken on or shortly before this day",
   folder: "Only the year is known, from the folder name",
   mtime: "Date taken from the file's modified time — may be wrong",
   exif: "Time zone unknown",
@@ -66,7 +67,7 @@ const TIME_SOURCE_NOTE: Record<string, string> = {
 /** Only as precise as the source allows: a year from a folder name isn't "1 Jan, 00:00". */
 function formatTaken(t: number, source: string | null): string {
   if (source === "folder") return formatYear(t);
-  if (source === "gps-date") return formatDate(t);
+  if (source === "gps-date" || source === "edited") return formatDate(t);
   return formatDateTime(t);
 }
 
@@ -231,6 +232,14 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                         Show on map
                       </button>
                     )}
+                    <a
+                      className="btn btn-small"
+                      href={`https://www.google.com/maps/search/?api=1&query=${d.lat},${d.lon}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open in Google Maps
+                    </a>
                     <button className="btn btn-small" onClick={() => setEditing(true)}>
                       Change
                     </button>

@@ -29,6 +29,9 @@ export type TimeSource =
   | "folder"; // only the year, from the folder name
 
 const MIN_YEAR = 1826;
+
+/** Placeholder dates written by software, not cameras. Picasa uses 2002-12-08 noon. */
+const BOGUS_DATES = new Set(["2002:12:08 12:00:00"]);
 const maxYear = () => new Date().getUTCFullYear() + 1;
 
 function validWall(y: number, mo: number, d: number, h: number, mi: number, s: number): number | null {
@@ -114,13 +117,16 @@ const FILENAME_DATETIME =
   /(?<!\d)(19[89]\d|20[0-4]\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?:[-_ T.]|\sat\s)?([01]\d|2[0-3])[-_.]?([0-5]\d)[-_.]?([0-5]\d)/;
 const FILENAME_DATE = /(?<!\d)(19[89]\d|20[0-4]\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)/;
 
+/** A full date and time in a camera app's file name (IMG_20161203_193220.jpg). */
+export function dateTimeFromFilename(name: string): number | null {
+  const m = FILENAME_DATETIME.exec(name);
+  return m ? validWall(+m[1]!, +m[2]!, +m[3]!, +m[4]!, +m[5]!, +m[6]!) : null;
+}
+
 /** IMG_20190612_142201.jpg, PXL_20230101_101010123.jpg, IMG-20190612-WA0001.jpg, "Screenshot 2019-06-12 at 21.31.19". */
 export function dateFromFilename(name: string): number | null {
-  const m = FILENAME_DATETIME.exec(name);
-  if (m) {
-    const w = validWall(+m[1]!, +m[2]!, +m[3]!, +m[4]!, +m[5]!, +m[6]!);
-    if (w != null) return w;
-  }
+  const full = dateTimeFromFilename(name);
+  if (full != null) return full;
   const d = FILENAME_DATE.exec(name);
   if (d) {
     // Noon, so an unknown offset can't push it onto the neighbouring day.
@@ -191,9 +197,16 @@ export function resolveTime(i: TimeInput): TimeResult | null {
       [e.CreateDate, e.OffsetTimeDigitized],
       [e.ModifyDate, e.OffsetTime],
     ];
-    for (const [dateVal, offVal] of candidates) {
+    for (const [k, [dateVal, offVal]] of candidates.entries()) {
+      if (BOGUS_DATES.has(str(dateVal)?.trim() ?? "")) continue;
       const parsed = parseDateString(str(dateVal));
       if (!parsed) continue;
+      // Without a capture date, the camera app's own file name beats the weaker
+      // create/modify dates, which editors rewrite (IMG_20161203_193220.jpg).
+      if (k > 0) {
+        const fromName = dateTimeFromFilename(i.name);
+        if (fromName != null) return { local: fromName, offset: geoOffset(i.lat, i.lon, fromName), source: "filename" };
+      }
       const wall = parsed.wall;
       const embedded = parsed.offset ?? parseOffset(str(offVal));
       if (embedded != null) return { local: wall, offset: embedded, source: "exif+offset" };
@@ -235,7 +248,7 @@ export function resolveTime(i: TimeInput): TimeResult | null {
   }
 
   const fn = dateFromFilename(i.name);
-  if (fn != null) return { local: fn, offset: null, source: "filename" };
+  if (fn != null) return { local: fn, offset: geoOffset(i.lat, i.lon, fn), source: "filename" };
   const epoch = epochFromFilename(i.name);
   if (epoch != null) {
     const off = geoOffset(i.lat, i.lon, epoch) ?? localOffsetAtInstant(epoch * 1000);

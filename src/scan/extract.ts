@@ -229,3 +229,53 @@ async function extractVideo(path: string, name: string, mtimeMs: number): Promis
 export function extract(path: string, kind: Kind, name: string, mtimeMs: number): Promise<Extracted> {
   return kind === "video" ? extractVideo(path, name, mtimeMs) : extractImage(path, name, mtimeMs);
 }
+
+// ---------------------------------------------------------------- editor save times
+
+/** A document ID Adobe tools stamp into countless files; its timestamp means nothing. */
+const ADOBE_PLACEHOLDER_ID = "faf5bdd5-ba3d-11da-ad31-d33d75182f1b";
+const UUID_EPOCH_OFFSET = 122192928000000000n; // 100 ns ticks from 1582-10-15 to 1970-01-01
+
+/**
+ * Version-1 UUIDs embed the moment they were generated. Photoshop and Lightroom use them
+ * for XMP document/instance IDs ("xmp.iid:8683A3D3DFAC11E1922ED22E09E88736"), so they
+ * record when a file was saved. Returns UTC seconds, or null for other UUID kinds.
+ */
+export function uuidV1Seconds(id: string): number | null {
+  const hex = id.slice(id.lastIndexOf(":") + 1).replace(/-/g, "").toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex) || hex[12] !== "1") return null;
+  if (id.toLowerCase().includes(ADOBE_PLACEHOLDER_ID)) return null;
+  const ticks = BigInt("0x" + hex.slice(13, 16) + hex.slice(8, 12) + hex.slice(0, 8));
+  return Number((ticks - UUID_EPOCH_OFFSET) / 10_000_000n);
+}
+
+/**
+ * When an editor last saved the file: the earliest of the XMP save/metadata dates and the
+ * times inside its document IDs. A photo was taken before it was edited, usually shortly
+ * before. Only read for photos that have no date of their own.
+ */
+export async function editedAt(path: string): Promise<number | null> {
+  let x: Record<string, unknown> | undefined;
+  try {
+    x = await exifr.parse(path, { tiff: false, exif: false, gps: false, ifd1: false, xmp: true, mergeOutput: true, reviveValues: false });
+  } catch {
+    return null;
+  }
+  if (!x) return null;
+  const times: number[] = [];
+  const ids: unknown[] = [x.InstanceID, x.DocumentID, x.OriginalDocumentID];
+  const derived = x.DerivedFrom as Record<string, unknown> | undefined;
+  if (derived && typeof derived === "object") ids.push(derived.instanceID, derived.documentID, derived.originalDocumentID);
+  for (const id of ids) {
+    const t = typeof id === "string" ? uuidV1Seconds(id) : null;
+    if (t != null) times.push(t);
+  }
+  for (const v of [x.MetadataDate, x.ModifyDate, x.CreateDate]) {
+    const p = typeof v === "string" ? parseDateString(v) : null;
+    if (p) times.push(p.wall - (p.offset ?? 0) * 60);
+  }
+  const lo = Date.UTC(1995, 0, 1) / 1000;
+  const hi = Date.now() / 1000 + 86400;
+  const valid = times.filter((t) => t >= lo && t <= hi);
+  return valid.length ? Math.min(...valid) : null;
+}

@@ -136,3 +136,26 @@ test("a GPS date with a garbage time still gives the day", () => {
   const r = resolveTime({ name: "IMAG0178-edited.jpg", mtimeMs: 0, lat: 56.84, lon: 35.91, exif: { GPSDateStamp: "2012:08:07", GPSTimeStamp: [35, 54, 50.43] } });
   expect(r).toEqual({ local: wall("2012-08-07T12:00:00"), offset: 240, source: "gps-date" });
 });
+
+describe("placeholder dates", () => {
+  test("Picasa's 2002-12-08 placeholder loses to the date in the file name", () => {
+    const r = resolveTime({ name: "IMG_20161203_193220.jpg", mtimeMs: 0, exif: { CreateDate: "2002:12:08 12:00:00", ModifyDate: "2016:10:06 19:27:05" } });
+    expect(r?.source).toBe("filename");
+    expect(r?.local).toBe(wall("2016-12-03T19:32:20"));
+  });
+
+  test("the file name also beats a real-looking modify date when there's no capture date", () => {
+    const r = resolveTime({ name: "IMG_20130218_141928.jpg", mtimeMs: 0, exif: { ModifyDate: "2013:03:01 10:00:00" } });
+    expect(r?.local).toBe(wall("2013-02-18T14:19:28"));
+  });
+
+  test("a capture date still beats the file name", () => {
+    const r = resolveTime({ name: "IMG_20161203_193220.jpg", mtimeMs: 0, exif: { DateTimeOriginal: "2016:12:03 19:32:21" } });
+    expect(r?.source).toBe("exif");
+  });
+
+  test("the placeholder alone is ignored entirely", () => {
+    const r = resolveTime({ name: "DSC0001.jpg", mtimeMs: Date.parse("2020-01-01T00:00:00Z"), exif: { CreateDate: "2002:12:08 12:00:00" } });
+    expect(r?.source).toBe("mtime");
+  });
+});

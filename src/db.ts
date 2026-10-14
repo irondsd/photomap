@@ -162,6 +162,14 @@ export function markMissing(rootId: number, gen: number, under?: string): number
     .changes
 }
 
+/** Small key/value settings, e.g. which extractor version last read a root. */
+export function getMeta(key: string): string | null {
+  return db.query<{ value: string }, [string]>(`SELECT value FROM meta WHERE key = ?`).get(key)?.value ?? null
+}
+export function setMeta(key: string, value: string) {
+  db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`, [key, value])
+}
+
 export function nextScanGen(): number {
   const row = db.query<{ value: string }, []>(`SELECT value FROM meta WHERE key = 'scan_gen'`).get()
   const gen = Number(row?.value ?? 0) + 1

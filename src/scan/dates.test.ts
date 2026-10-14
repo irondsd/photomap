@@ -82,6 +82,41 @@ test("the folder year overrules neighbours from another year (a collage made lat
   expect(fixFor([a, b, p], p)).toMatchObject({ source: "folder", local: Date.UTC(2018, 0, 1) / 1000 });
 });
 
+describe("editor save time", () => {
+  const saved = Date.UTC(2012, 7, 6, 9, 53) / 1000;
+
+  test("used when there's nothing better", () => {
+    const p = undated("IMG_4718.jpg", { savedAt: saved });
+    expect(fixFor([p], p)).toMatchObject({ source: "edited", local: saved + -180 * 60 });
+  });
+
+  test("beats numbered neighbours that are far apart", () => {
+    const a = row("IMG_4600.jpg", Date.UTC(2012, 5, 10) / 1000, "exif");
+    const b = row("IMG_4800.jpg", Date.UTC(2012, 9, 1) / 1000, "exif");
+    const p = undated("IMG_4718.jpg", { savedAt: saved });
+    expect(fixFor([a, b, p], p)?.source).toBe("edited");
+  });
+
+  test("a rough neighbour estimate shortly before the save is kept", () => {
+    const a = row("IMG_4700.jpg", saved - 7 * 24 * H, "exif"); // a week before the save
+    const b = row("IMG_4800.jpg", saved + 60 * 24 * H, "exif");
+    const p = undated("IMG_4710.jpg", { savedAt: saved });
+    expect(fixFor([a, b, p], p)).toMatchObject({ source: "sequence", local: saved - 7 * 24 * H });
+  });
+
+  test("loses to numbered neighbours from the same day", () => {
+    const a = row("IMG_4717.jpg", T, "exif");
+    const b = row("IMG_4719.jpg", T + H, "exif");
+    const p = undated("IMG_4718.jpg", { savedAt: saved });
+    expect(fixFor([a, b, p], p)?.source).toBe("sequence");
+  });
+
+  test("ignored when it doesn't match the folder's year (re-saved years later)", () => {
+    const p = undated("IMG_4718.jpg", { savedAt: Date.UTC(2019, 0, 1) / 1000 });
+    expect(fixFor([p], p)?.source).toBe("folder");
+  });
+});
+
 test("folder year sorts at the end of that year", () => {
   const p = undated("bwEbsPO.jpg");
   expect(fixFor([p], p)).toMatchObject({ local: Date.UTC(2012, 0, 1) / 1000, offset: null, source: "folder" });
@@ -97,4 +132,50 @@ test("filename timestamps borrow the zone of photos around them", () => {
   const nearby = row("IMG_1.jpg", utc + 2 * H + 240 * 60, "exif+offset"); // UTC+4, two hours later
   const fb = row("FB_IMG_1344340800000.jpg", utc - 180 * 60, "filename-utc", { offset: -180 }); // got the Mac's UTC−3
   expect(fixFor([nearby, fb], fb)).toMatchObject({ local: utc + 240 * 60, offset: 240 });
+});
+
+describe("dates that contradict their folder", () => {
+  const day = 24 * H;
+
+  test("a correctly dated twin of the same shot wins (a TIF converted years later)", () => {
+    const jpg = row("IMG_1938.JPG", Date.UTC(2011, 4, 28, 14, 53) / 1000, "exif", { dir: "/lib/Photos from 2011", model: "Canon EOS 500D" });
+    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27, 10, 46) / 1000, "exif", { dir: "/lib/Photos from 2019", model: "Canon EOS 500D" });
+    expect(fixFor([jpg, tif], tif)).toMatchObject({ source: "original", local: jpg.t });
+  });
+
+  test("another camera's file with the same name is not a twin", () => {
+    const other = row("IMG_1938.JPG", Date.UTC(2011, 4, 28) / 1000, "exif", { dir: "/lib/Photos from 2011", model: "iPhone 4" });
+    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27) / 1000, "exif", { dir: "/lib/Photos from 2019", model: "Canon EOS 500D" });
+    expect(fixFor([other, tif], tif)?.source).toBe("folder");
+  });
+
+  test("otherwise the folder year wins, keeping a burst in order", () => {
+    const shots = [0, 7, 11].map((s, k) => row(`DSC_${1156 + k}.jpg`, Date.UTC(2011, 3, 4, 17, 10) / 1000 + s, "exif", { dir: "/lib/Photos from 2020", model: "NIKON D3100" }));
+    // Another contradicted photo in the same folder, years apart, mustn't disturb the burst.
+    const collage = row("IMG_0897-COLLAGE.jpg", Date.UTC(2010, 7, 5) / 1000, "exif", { dir: "/lib/Photos from 2020" });
+    const fixes = inferDates([...shots, collage], machine);
+    const start = Date.UTC(2020, 0, 1, 17, 10) / 1000;
+    expect(shots.map((s) => fixes.find((f) => f.id === s.id))).toMatchObject([
+      { source: "folder", local: start },
+      { source: "folder", local: start + 7 },
+      { source: "folder", local: start + 11 },
+    ]);
+  });
+
+  test("a collage is a new image, never a twin of its first photo", () => {
+    const orig = row("IMG_20160422_143639.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", { dir: "/lib/Photos from 2016", model: "Pixel" });
+    const collage = row("IMG_20160422_143639-COLLAGE.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", { dir: "/lib/Photos from 2018", model: "Pixel" });
+    expect(fixFor([orig, collage], collage)?.source).toBe("folder");
+  });
+
+  test("New Year is not a contradiction (Google files by UTC)", () => {
+    const p = row("IMG_1.jpg", Date.UTC(2012, 11, 31, 23, 30) / 1000, "exif", { dir: "/lib/Photos from 2013" });
+    expect(fixFor([p], p)).toBeUndefined();
+  });
+
+  test("a contradicted date never anchors numbered neighbours", () => {
+    const wrong = row("IMG_0100.jpg", Date.UTC(2009, 0, 1) / 1000 + 5 * day, "exif", { dir: "/lib/Photos from 2019" });
+    const p = undated("IMG_0101.jpg", { dir: "/lib/Photos from 2019" });
+    expect(fixFor([wrong, p], p)?.source).toBe("folder");
+  });
 });

@@ -60,7 +60,7 @@ function sourceCode(gps: string | null): number {
 function datePrecision(ts: string | null): number {
   if (ts === 'mtime' || ts == null) return 3
   if (ts === 'folder') return 2
-  if (ts === 'sequence' || ts === 'gps-date') return 1
+  if (ts === 'sequence' || ts === 'gps-date' || ts === 'edited') return 1
   return 0
 }
 

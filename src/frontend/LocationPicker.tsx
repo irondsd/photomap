@@ -87,12 +87,16 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
     mapRef.current?.flyTo({ center: [c.lon, c.lat], zoom: Math.max(mapRef.current.getZoom(), 15), duration: 600 });
   };
 
+  // With nothing chosen, saving takes the suggested spot: it is usually right.
+  // Not while the box holds text that didn't parse, so a typo never saves the hint.
+  const target = pos ?? (text.trim() ? null : (hint?.at ?? null));
+
   const save = async () => {
-    if (!pos || saving) return;
+    if (!target || saving) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave(pos);
+      await onSave(target);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
@@ -118,10 +122,11 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       <div className="dim small">
         {pos ? "Drag the pin to adjust." : "Click the map to drop a pin."}
         {hint && <> The grey dot is {hint.label}.</>}
+        {!pos && target && <> Save without a pin to use it.</>}
       </div>
       {error && <div className="error">{error}</div>}
       <div className="row">
-        <button className="btn btn-small btn-primary" disabled={!pos || saving} onClick={save}>
+        <button className="btn btn-small btn-primary" disabled={!target || saving} onClick={save}>
           {saving ? "Saving…" : "Save location"}
         </button>
         <button className="btn btn-small" onClick={onCancel}>
