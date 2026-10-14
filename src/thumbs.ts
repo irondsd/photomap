@@ -5,10 +5,12 @@ import { existsSync } from "node:fs";
 import { THUMB_DIR, CPUS } from "./config";
 import { db, type PhotoRow } from "./db";
 
-export type ThumbSize = "s" | "l";
+export type ThumbSize = "s" | "m" | "l";
+export const THUMB_SIZES: readonly ThumbSize[] = ["s", "m", "l"];
 
 const SPEC: Record<ThumbSize, { px: number; quality: number }> = {
-  s: { px: 320, quality: 74 }, // square crop: grid cells and map markers
+  s: { px: 320, quality: 74 }, // square crop: sidebar grid and map markers
+  m: { px: 400, quality: 76 }, // 400 px tall, uncropped: gallery rows (2× for ~200 px rows)
   l: { px: 2048, quality: 84 }, // fit inside: viewer
 };
 
@@ -82,7 +84,10 @@ async function sipsDecode(path: string, px: number, out: string): Promise<Buffer
 async function render(input: string | Buffer, size: ThumbSize): Promise<Buffer> {
   const { px, quality } = SPEC[size];
   let img = sharp(input, { failOn: "none", limitInputPixels: 0, animated: false }).rotate();
-  img = size === "s" ? img.resize(px, px, { fit: "cover", position: "attention" }) : img.resize(px, px, { fit: "inside", withoutEnlargement: true });
+  img =
+    size === "s" ? img.resize(px, px, { fit: "cover", position: "attention" })
+    : size === "m" ? img.resize(px * 3, px, { fit: "inside", withoutEnlargement: true }) // panoramas up to 3:1
+    : img.resize(px, px, { fit: "inside", withoutEnlargement: true });
   return img.jpeg({ quality, mozjpeg: false }).toBuffer();
 }
 
@@ -95,7 +100,7 @@ async function generate(p: ThumbSource, size: ThumbSize, out: string): Promise<s
   } else {
     if (p.kind === "photo") data = await render(p.path, size).catch(() => null);
     if (!data && process.platform === "darwin") {
-      const decoded = await sipsDecode(p.path, size === "s" ? 640 : px, out);
+      const decoded = await sipsDecode(p.path, size === "l" ? px : 1200, out);
       if (decoded) data = await render(decoded, size).catch(() => null);
     }
   }
@@ -124,24 +129,27 @@ export function getThumb(p: ThumbSource, size: ThumbSize): Promise<string | null
 const g = globalThis as { __pmPregenRunning?: boolean };
 
 /**
- * Fills the small-thumbnail cache for the whole library, newest photos first.
- * The server passes fewer workers so on-demand requests from the UI still get slots.
+ * Fills the sidebar (s) and gallery (m) thumbnail caches for the whole library, newest
+ * photos first. The server passes fewer workers so on-demand requests from the UI still get slots.
  */
 export async function pregenerateThumbs(onProgress?: (done: number, total: number) => void, workers = Math.max(2, CPUS)) {
   if (g.__pmPregenRunning) return;
   g.__pmPregenRunning = true;
   try {
-    const rows = db
+    const jobs: [ThumbSource, ThumbSize][] = [];
+    for (const r of db
       .query<ThumbSource, []>(`SELECT id, path, mtime, kind, duration FROM photos WHERE missing = 0 ORDER BY taken_local DESC`)
-      .all()
-      .filter((r) => !existsSync(cacheFile(r, "s")));
+      .all()) {
+      for (const size of ["s", "m"] as const) if (!existsSync(cacheFile(r, size))) jobs.push([r, size]);
+    }
     let done = 0;
     let i = 0;
     await Promise.all(
       Array.from({ length: workers }, async () => {
-        while (i < rows.length) {
-          await getThumb(rows[i++]!, "s");
-          onProgress?.(++done, rows.length);
+        while (i < jobs.length) {
+          const [r, size] = jobs[i++]!;
+          await getThumb(r, size);
+          onProgress?.(++done, jobs.length);
         }
       }),
     );

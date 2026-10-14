@@ -41,19 +41,21 @@ interface Row {
   lat: number | null
   lon: number | null
   inferred: number
+  timeSource: string | null
   name: string
   country: string | null
 }
 const rows: Row[] = db
   .query<Row, []>(
-    `SELECT id, taken_local t, tz_offset offset, lat, lon, gps_source LIKE 'inferred:%' inferred, name, country
+    `SELECT id, taken_local t, tz_offset offset, lat, lon, gps_source LIKE 'inferred:%' inferred, time_source timeSource, name, country
      FROM photos WHERE missing = 0`,
   )
   .all()
-// Previous inferences are recomputed, never used as evidence.
+// Previous inferences are recomputed, never used as evidence. A file's modified time is
+// when it was copied or exported, not when it was taken, so those photos count as undated.
 const photos: BackfillPhoto[] = rows
   .map((r) => (r.inferred ? { ...r, lat: null, lon: null } : r))
-  .map((r) => ({ ...r, t: r.t ?? NaN }))
+  .map((r) => ({ ...r, t: r.t != null && r.timeSource !== 'mtime' ? r.t : NaN }))
 const byId = new Map<number, Row>(rows.map((r): [number, Row] => [r.id, r]))
 
 const { proposals, skipped, homes } = infer(photos)
@@ -97,7 +99,7 @@ const REASON = {
   moving: 'moving: places before and after differ',
   'neighbours-far-in-time': 'nearest GPS photos too far away in time',
   'no-neighbours': 'no GPS photos at all',
-  undated: 'no date',
+  undated: 'no reliable date (none, or only the file modified time)',
 } as const
 console.log(`\nLeft for manual review: ${skipped.length}`)
 for (const [reason, label] of Object.entries(REASON)) {

@@ -126,7 +126,8 @@ export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped
   const utc = (p: BackfillPhoto) => p.t - (p.offset ?? nearestOffset(p.t)) * 60;
 
   const fixes: Fix[] = photos
-    .filter((p): p is BackfillPhoto & { lat: number; lon: number } => p.lat != null && p.lon != null)
+    // A location without a trustworthy time can't place anything else.
+    .filter((p): p is BackfillPhoto & { lat: number; lon: number } => p.lat != null && p.lon != null && Number.isFinite(p.t))
     .map((p) => ({ id: p.id, u: utc(p), t: p.t, lat: p.lat, lon: p.lon }))
     .sort((a, b) => a.u - b.u);
   const homes = detectHomes(fixes);
@@ -203,7 +204,9 @@ export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped
       const lat = (prev.lat + next.lat) / 2;
       const lon = (prev.lon + next.lon) / 2;
       if (spanH <= STAY_MAX_H) {
-        proposals.push({ id: p.id, lat, lon, rule: "stay", confidence: spanH <= STAY_SURE_H ? "high" : "medium", from: [prev.id, next.id], gapMin: Math.max(gp, gn) });
+        // Over longer spans, "same spot before and after" often means you went out and came
+        // back (hold-out test: under a third within 1 km), so those are only a guess.
+        proposals.push({ id: p.id, lat, lon, rule: "stay", confidence: spanH <= STAY_SURE_H ? "high" : "low", from: [prev.id, next.id], gapMin: Math.max(gp, gn) });
         continue;
       }
       if (spanH <= HOME_MAX_DAYS * 24 && homeAt(lat, lon, p.t)) {

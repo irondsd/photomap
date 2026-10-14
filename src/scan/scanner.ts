@@ -138,8 +138,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
           const name = basename(c.path);
           const run = () => extract(c.path, c.kind, name, st.mtimeMs);
           let meta = c.kind === "video" ? await videoSlots.run(run) : await run();
-          // A location tagged by hand survives the file changing, unless the file now has GPS itself.
-          if (prev?.gps_source === "manual" && meta.lat == null && prev.lat != null && prev.lon != null) {
+          // A location set by hand wins over the file's own GPS, and survives the file changing.
+          if (prev?.gps_source === "manual" && prev.lat != null && prev.lon != null) {
             meta = keepManualLocation(meta, prev.lat, prev.lon);
           }
           if (meta.error) status.errors++;

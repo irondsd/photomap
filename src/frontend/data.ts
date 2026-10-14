@@ -8,24 +8,43 @@ export interface Points {
   lon: Float32Array;
   id: Uint32Array;
   kind: Uint8Array;
+  /** Width / height as displayed; NaN when unknown. */
+  aspect: Float32Array;
+  /** 0 = none, otherwise 1 + index into `countries`. */
+  country: Uint16Array;
+  countries: string[];
+  /** Where the location came from; see SOURCE. */
+  source: Uint8Array;
 }
+
+export const SOURCE = { none: 0, file: 1, inferred: 2, manual: 3 } as const;
 
 export const KIND = { photo: 0, raw: 1, video: 2 } as const;
 export const KIND_BIT = [1, 2, 4] as const;
 export const ALL_KINDS = 7;
 
 export async function loadPoints(): Promise<Points> {
+  // Layout: see encodePoints in server.ts.
   const buf = await (await fetch("/api/points")).arrayBuffer();
-  const n = new Uint32Array(buf, 0, 1)[0]!;
-  let off = 8;
-  const t = new Float64Array(buf, off, n); off += n * 8;
-  const lat = new Float32Array(buf, off, n); off += n * 4;
-  const lon = new Float32Array(buf, off, n); off += n * 4;
-  const id = new Uint32Array(buf, off, n); off += n * 4;
-  const kind = new Uint8Array(buf, off, n);
+  const [n, jsonBytes] = new Uint32Array(buf, 0, 2) as unknown as [number, number];
+  const countries = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, jsonBytes))) as string[];
+  let off = 8 + Math.ceil(jsonBytes / 8) * 8;
+  const col = <T>(make: new (b: ArrayBuffer, o: number, l: number) => T, bytes: number): T => {
+    const a = new make(buf, off, n);
+    off += n * bytes;
+    return a;
+  };
+  const t = col(Float64Array, 8);
+  const lat = col(Float32Array, 4);
+  const lon = col(Float32Array, 4);
+  const aspect = col(Float32Array, 4);
+  const id = col(Uint32Array, 4);
+  const country = col(Uint16Array, 2);
+  const kind = col(Uint8Array, 1);
+  const source = col(Uint8Array, 1);
   let dated = n;
   while (dated > 0 && Number.isNaN(t[dated - 1]!)) dated--;
-  return { n, dated, t, lat, lon, id, kind };
+  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source };
 }
 
 /** First index with t >= x, within the dated prefix. */
@@ -125,6 +144,7 @@ export const formatDate = (t: number) => fmt({ year: "numeric", month: "short", 
 export const formatDateTime = (t: number) =>
   fmt({ year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(t * 1000);
 export const formatMonth = (t: number) => fmt({ year: "numeric", month: "short" }).format(t * 1000);
+export const formatDayHeader = (t: number) => fmt({ weekday: "short", year: "numeric", month: "short", day: "numeric" }).format(t * 1000);
 export const formatMonthShort = (t: number) => fmt({ month: "short" }).format(t * 1000);
 export const formatDayShort = (t: number) => fmt({ month: "short", day: "numeric" }).format(t * 1000);
 export const formatHour = (t: number) => fmt({ hour: "2-digit", minute: "2-digit" }).format(t * 1000);
@@ -163,3 +183,38 @@ export function formatExposure(s: number | null): string | null {
 }
 
 export const nf = new Intl.NumberFormat();
+
+// ---------------------------------------------------------------- hints
+
+function formatGap(seconds: number) {
+  const m = Math.abs(seconds) / 60;
+  if (m < 1) return "a few seconds";
+  if (m < 90) return `${Math.round(m)} min`;
+  if (m < 48 * 60) return `${Math.round(m / 60)} h`;
+  return `${Math.round(m / 1440)} days`;
+}
+
+/**
+ * The geotagged photo closest in time to point i, as a starting point for placing it.
+ * `skip` excludes photos whose location is being replaced (e.g. the rest of a selection).
+ */
+export function nearestTagged(points: Points, i: number, skip?: (j: number) => boolean): { at: { lat: number; lon: number }; label: string } | null {
+  const t = points.t[i]!;
+  if (Number.isNaN(t)) return null;
+  let best = -1;
+  for (const dir of [-1, 1]) {
+    for (let j = i + dir; j >= 0 && j < points.dated; j += dir) {
+      if (Number.isNaN(points.lat[j]!) || skip?.(j)) continue;
+      if (best < 0 || Math.abs(points.t[j]! - t) < Math.abs(points.t[best]! - t)) best = j;
+      break;
+    }
+  }
+  if (best < 0) return null;
+  const dt = points.t[best]! - t;
+  // Further apart than this, where you were then says nothing about this photo.
+  if (Math.abs(dt) > 30 * 86400) return null;
+  return {
+    at: { lat: points.lat[best]!, lon: points.lon[best]! },
+    label: `where your photo from ${formatGap(dt)} ${dt < 0 ? "earlier" : "later"} was taken`,
+  };
+}

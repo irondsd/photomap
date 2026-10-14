@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatBytes, formatDateTime, formatExposure, formatOffset, nf, type Points } from "./data";
+import { formatBytes, formatDateTime, formatExposure, formatOffset, nearestTagged, nf, type Points } from "./data";
 import { LocationPicker } from "./LocationPicker";
+import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
 
 interface PhotoDetail {
@@ -55,34 +56,6 @@ const TIME_SOURCE_NOTE: Record<string, string> = {
   mtime: "Date taken from the file's modified time — may be wrong",
   exif: "Time zone unknown",
 };
-
-function formatGap(seconds: number) {
-  const m = Math.abs(seconds) / 60;
-  if (m < 1) return "a few seconds";
-  if (m < 90) return `${Math.round(m)} min`;
-  if (m < 48 * 60) return `${Math.round(m / 60)} h`;
-  return `${Math.round(m / 1440)} days`;
-}
-
-/** The geotagged photo closest in time, as a starting point for placing an untagged one. */
-function nearestTagged(points: Points, i: number): { at: LatLon; label: string } | null {
-  const t = points.t[i]!;
-  if (Number.isNaN(t)) return null;
-  let best = -1;
-  for (const dir of [-1, 1]) {
-    for (let j = i + dir; j >= 0 && j < points.dated; j += dir) {
-      if (Number.isNaN(points.lat[j]!)) continue;
-      if (best < 0 || Math.abs(points.t[j]! - t) < Math.abs(points.t[best]! - t)) best = j;
-      break;
-    }
-  }
-  if (best < 0) return null;
-  const dt = points.t[best]! - t;
-  return {
-    at: { lat: points.lat[best]!, lon: points.lon[best]! },
-    label: `where your photo from ${formatGap(dt)} ${dt < 0 ? "earlier" : "later"} was taken`,
-  };
-}
 
 async function sendLocation(id: number, c: LatLon | null): Promise<PhotoDetail> {
   const r = await fetch(`/api/photos/${id}/location`, {
@@ -156,11 +129,10 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     setEditing(false);
     onLocationChange();
   };
-  const removeLocation = () => {
-    if (confirm("Remove the location you added to this photo?")) saveLocation(null).catch((err) => alert(err.message));
+  const resetLocation = () => {
+    const ok = confirm("Undo the location you set?\n\nThe photo goes back to the location stored in its file, or to no location if the file has none.");
+    if (ok) saveLocation(null).catch((err) => alert(err.message));
   };
-  // Only locations the file doesn't carry can be added or changed here.
-  const assigned = d?.gps_source == null || d.gps_source === "manual" || d.gps_source.startsWith("inferred:");
   const settings = d && [d.fnumber && `ƒ/${+d.fnumber.toFixed(1)}`, formatExposure(d.exposure), d.iso && `ISO ${d.iso}`, d.focal && `${+d.focal.toFixed(1)} mm`].filter(Boolean);
 
   return (
@@ -232,8 +204,9 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
               ) : d.lat != null && d.lon != null ? (
                 <section>
                   <h4>Location</h4>
+                  <MiniMap lat={d.lat} lon={d.lon} />
                   <div>{d.country ?? "Unknown country"}</div>
-                  {d.gps_source === "manual" && <div className="dim small">Added by you</div>}
+                  {d.gps_source === "manual" && <div className="dim small">Set by you</div>}
                   {d.gps_source && GPS_SOURCE_NOTE[d.gps_source] && <div className="note">{GPS_SOURCE_NOTE[d.gps_source]}</div>}
                   <div className="dim mono">
                     {d.lat.toFixed(5)}, {d.lon.toFixed(5)}
@@ -245,14 +218,12 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                         Show on map
                       </button>
                     )}
-                    {assigned && (
-                      <button className="btn btn-small" onClick={() => setEditing(true)}>
-                        Change
-                      </button>
-                    )}
+                    <button className="btn btn-small" onClick={() => setEditing(true)}>
+                      Change
+                    </button>
                     {d.gps_source === "manual" && (
-                      <button className="btn btn-small" onClick={removeLocation}>
-                        Remove
+                      <button className="btn btn-small" onClick={resetLocation} title="Go back to the location stored in the file">
+                        Reset
                       </button>
                     )}
                   </div>

@@ -3,9 +3,9 @@ import index from './frontend/index.html'
 import { HOST, PORT, CPUS } from './config'
 import { db, getPhoto, getRoot, getRoots, removeRoot, stats, cameraName, type RootRow } from './db'
 import { registerTarget, type ScanTarget } from './scan/roots'
-import { setLocation } from './scan/locate'
+import { restoreFromFile, setLocation } from './scan/locate'
 import { scanRoot, cancelScan, status as scanStatus } from './scan/scanner'
-import { getThumb, hasThumb, pregenerateThumbs, thumbETag, type ThumbSize } from './thumbs'
+import { getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from './thumbs'
 
 /** Bumped whenever the index changes so the client knows to refetch points. */
 let dataVersion = Date.now()
@@ -41,38 +41,68 @@ const bad = (message: string, status = 400) => json({ error: message }, { status
 // ---------------------------------------------------------------- points
 const KIND_CODE: Record<string, number> = { photo: 0, raw: 1, video: 2 }
 
+/** Where a location came from: 0 none, 1 the file's own GPS, 2 inferred, 3 set by hand. */
+function sourceCode(gps: string | null): number {
+  if (gps == null) return 0
+  if (gps === 'manual') return 3
+  return gps.startsWith('inferred:') ? 2 : 1
+}
+
 /**
  * Column-oriented binary blob, sorted by time (undated last):
- *   u32 count, u32 pad | f64 t[n] | f32 lat[n] | f32 lon[n] | u32 id[n] | u8 kind[n]
- * Missing time/coords are NaN. ~21 bytes per photo.
+ *   u32 count, u32 jsonBytes | JSON country names, padded to 8 bytes
+ *   | f64 t[n] | f32 lat[n] | f32 lon[n] | f32 aspect[n] | u32 id[n]
+ *   | u16 country[n] (0 = none, else 1 + index into the names) | u8 kind[n] | u8 source[n]
+ * Missing time/coords/aspect are NaN. ~29 bytes per photo.
  */
 function encodePoints(): ArrayBuffer {
   const rows = db
-    .query<{ id: number; t: number | null; lat: number | null; lon: number | null; kind: string }, []>(
-      `SELECT id, taken_local t, lat, lon, kind FROM photos WHERE missing = 0
+    .query<
+      { id: number; t: number | null; lat: number | null; lon: number | null; kind: string; w: number | null; h: number | null; country: string | null; gps: string | null },
+      []
+    >(
+      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps FROM photos WHERE missing = 0
        ORDER BY taken_local IS NULL, taken_local, id`,
     )
     .all()
   const n = rows.length
-  const buf = new ArrayBuffer(8 + n * (8 + 4 + 4 + 4 + 1))
-  new Uint32Array(buf, 0, 2).set([n, 0])
-  let off = 8
-  const t = new Float64Array(buf, off, n)
-  off += n * 8
-  const lat = new Float32Array(buf, off, n)
-  off += n * 4
-  const lon = new Float32Array(buf, off, n)
-  off += n * 4
-  const id = new Uint32Array(buf, off, n)
-  off += n * 4
-  const kind = new Uint8Array(buf, off, n)
+  const countries: string[] = []
+  const countryIndex = new Map<string, number>()
+  for (const r of rows) {
+    if (r.country && !countryIndex.has(r.country)) {
+      countries.push(r.country)
+      countryIndex.set(r.country, countries.length)
+    }
+  }
+  const json = new TextEncoder().encode(JSON.stringify(countries))
+  const head = 8 + Math.ceil(json.length / 8) * 8
+  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1))
+  new Uint32Array(buf, 0, 2).set([n, json.length])
+  new Uint8Array(buf, 8, json.length).set(json)
+  let off = head
+  const col = <T>(make: new (b: ArrayBuffer, o: number, l: number) => T, bytes: number): T => {
+    const a = new make(buf, off, n)
+    off += n * bytes
+    return a
+  }
+  const t = col(Float64Array, 8)
+  const lat = col(Float32Array, 4)
+  const lon = col(Float32Array, 4)
+  const aspect = col(Float32Array, 4)
+  const id = col(Uint32Array, 4)
+  const country = col(Uint16Array, 2)
+  const kind = col(Uint8Array, 1)
+  const source = col(Uint8Array, 1)
   for (let i = 0; i < n; i++) {
     const r = rows[i]!
     t[i] = r.t ?? NaN
     lat[i] = r.lat ?? NaN
     lon[i] = r.lon ?? NaN
+    aspect[i] = r.w && r.h ? r.w / r.h : NaN
     id[i] = r.id
+    country[i] = r.country ? countryIndex.get(r.country)! : 0
     kind[i] = KIND_CODE[r.kind] ?? 0
+    source[i] = sourceCode(r.gps)
   }
   return buf
 }
@@ -96,7 +126,7 @@ async function runScans(targets: ScanTarget[]) {
     }
   }
   // Background thumbnails at half capacity, leaving room for on-demand requests.
-  void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)))
+  if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)))
 }
 
 // ---------------------------------------------------------------- files
@@ -161,6 +191,13 @@ function clusterWorker(): Promise<string> {
   return workerJs
 }
 
+/** A JSON list of photo ids, deduplicated; null when malformed or empty. */
+function parseIds(v: unknown): number[] | null {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 200_000) return null
+  const ids = [...new Set(v.map(Number))]
+  return ids.every((n) => Number.isInteger(n) && n > 0) ? ids : null
+}
+
 const idParam = (s: string) => {
   const n = Number(s)
   return Number.isInteger(n) && n > 0 ? n : null
@@ -194,13 +231,13 @@ const server = Bun.serve({
       }),
     },
 
-    // Locations set by hand. Photos whose file carries GPS can't be overridden.
+    // Locations set by hand; they take precedence over the file's own GPS.
     '/api/photos/:id/location': {
       POST: guard(async (req) => {
         const id = idParam(req.params.id)
         const p = id && getPhoto(id)
         if (!p) return bad('not found', 404)
-        if (p.gps_source === 'exif' || p.gps_source === 'video') return bad('This photo has GPS data in the file', 409)
+        // Allowed even when the file has GPS: those are sometimes plainly wrong.
         const body = (await req.json().catch(() => null)) as { lat?: unknown; lon?: unknown } | null
         const lat = Number(body?.lat)
         const lon = Number(body?.lon)
@@ -212,15 +249,58 @@ const server = Bun.serve({
         const updated = getPhoto(p.id)!
         return json({ ...updated, camera: cameraName(updated.make, updated.model) })
       }),
-      DELETE: guard((req) => {
+      // Undo a hand-set location: back to whatever the file says (its own GPS, or none).
+      DELETE: guard(async (req) => {
         const id = idParam(req.params.id)
         const p = id && getPhoto(id)
         if (!p) return bad('not found', 404)
-        if (p.gps_source !== 'manual') return bad('Only locations added by hand can be removed', 409)
-        setLocation(p.id, null)
+        if (p.gps_source !== 'manual') return bad('Only locations set by hand can be reset', 409)
+        if (p.missing) return bad('The file is no longer on disk', 409)
+        await restoreFromFile(p.id)
         dataVersion = Date.now()
         const updated = getPhoto(p.id)!
         return json({ ...updated, camera: cameraName(updated.make, updated.model) })
+      }),
+    },
+
+    // The same for many photos at once (gallery selection).
+    '/api/locations': {
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { ids?: unknown; lat?: unknown; lon?: unknown } | null
+        const ids = parseIds(body?.ids)
+        const lat = Number(body?.lat)
+        const lon = Number(body?.lon)
+        if (!ids) return bad('ids must be a non-empty list of photo ids')
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+          return bad('lat and lon must be valid coordinates')
+        }
+        let changed = 0
+        db.transaction(() => {
+          for (const id of ids) {
+            if (!getPhoto(id)) continue
+            setLocation(id, { lat, lon, source: 'manual' })
+            changed++
+          }
+        })()
+        dataVersion = Date.now()
+        return json({ changed })
+      }),
+    },
+
+    '/api/locations/reset': {
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { ids?: unknown } | null
+        const ids = parseIds(body?.ids)
+        if (!ids) return bad('ids must be a non-empty list of photo ids')
+        let reset = 0
+        for (const id of ids) {
+          const p = getPhoto(id)
+          if (!p || p.gps_source !== 'manual' || p.missing) continue
+          await restoreFromFile(id)
+          reset++
+        }
+        dataVersion = Date.now()
+        return json({ reset })
       }),
     },
 
@@ -286,7 +366,7 @@ const server = Bun.serve({
       GET: guard(async (req) => {
         const size = req.params.size as ThumbSize
         const id = idParam(req.params.id)
-        if ((size !== 's' && size !== 'l') || !id) return bad('bad request')
+        if (!THUMB_SIZES.includes(size) || !id) return bad('bad request')
         const p = getPhoto(id)
         if (!p) return bad('not found', 404)
         // Revalidated on every use: a 304 costs nothing locally, and ids aren't stable forever.
@@ -338,4 +418,4 @@ const server = Bun.serve({
 console.log(`Photomap running at http://localhost:${server.port}`)
 
 // Catch up on thumbnails a previous run (or a CLI scan) didn't generate.
-void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)))
+if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)))

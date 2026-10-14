@@ -1,5 +1,5 @@
-import { db } from "../db";
-import { countryAt, type Extracted } from "./extract";
+import { db, getPhoto } from "../db";
+import { countryAt, extract, type Extracted } from "./extract";
 import { relocalize, type TimeSource } from "./datetime";
 
 /** Location sources that came from a person or an inference, never from the file itself. */
@@ -19,8 +19,9 @@ const setStmt = db.prepare(
 );
 
 /**
- * Sets (or with `null`, clears) a location the file doesn't carry, keeping country and
- * local time consistent with it. Callers must not use this on photos with real GPS.
+ * Sets (or with `null`, clears) a location that doesn't come from the file, keeping
+ * country and local time consistent with it. To undo a hand-set location on a photo
+ * whose file has GPS, use restoreFromFile instead.
  */
 export function setLocation(id: number, loc: { lat: number; lon: number; source: AssignedSource } | null) {
   const r = getStmt.get(id);
@@ -43,4 +44,25 @@ export function keepManualLocation(meta: Extracted, lat: number, lon: number): E
   }
   const c = countryAt(lat, lon);
   return { ...meta, ...time, lat, lon, alt: null, gps_source: "manual", country_code: c.code, country: c.name };
+}
+
+const restoreStmt = db.prepare(
+  `UPDATE photos SET lat = ?, lon = ?, alt = ?, gps_source = ?, country_code = ?, country = ?,
+     taken_local = ?, tz_offset = ?, time_source = ?
+   WHERE id = ?`,
+);
+
+/**
+ * Drops a location set by hand and goes back to what the file itself says: its own GPS
+ * (and the time zone that implies), or no location. Re-reads the file so the result is
+ * exactly what a fresh scan would produce.
+ */
+export async function restoreFromFile(id: number): Promise<void> {
+  const p = getPhoto(id);
+  if (!p) return;
+  const meta = await extract(p.path, p.kind, p.name, p.mtime);
+  restoreStmt.run(
+    meta.lat, meta.lon, meta.alt, meta.gps_source, meta.country_code, meta.country,
+    meta.taken_local, meta.tz_offset, meta.time_source, id,
+  );
 }

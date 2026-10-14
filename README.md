@@ -29,6 +29,11 @@ Environment: `PORT` (default 3000), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` 
 
 ## Using it
 
+The header switches between two views, **Map** and **Gallery**; the app reopens in the one you used last.
+
+- **Gallery:** every photo, newest first, grouped by day with the countries visited, in justified rows. The date rail on the right jumps through the years (click a year, or drag).
+  - **Selecting:** hover a photo and click its circle, Shift-click to extend a range, or use a day header's circle to select the whole day. Esc clears.
+  - **Set location…** places all selected photos at once, using the same map picker as single photos. **Reset** puts back what the files say.
 - **Map:** photos cluster by location, and each cluster shows its most recent photo and a count. Click a cluster to zoom into it. A cluster that can't be split any further (same spot) opens its photos. **Fit to photos** zooms to whatever the current filter matches.
 - **Timeline:**
   - Drag to select a range. It snaps to the bar size you're viewing.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Map as MlMap, Marker, NavigationControl } from "maplibre-gl";
-import { STYLE } from "./map";
+import { collapseAttribution, STYLE } from "./map";
 import { formatCoords, parseCoords, type LatLon } from "./coords";
 
 interface LocationPickerProps {
@@ -40,10 +40,12 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       pitchWithRotate: false,
     });
     map.touchZoomRotate.disableRotation();
+    collapseAttribution(map);
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
     map.getCanvas().style.cursor = "crosshair";
     map.on("click", (e) => placeFromMap({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
-    if (hint && !initial) {
+    // Shown when changing too: for a wrong location, the nearest photo in time is the best clue.
+    if (hint) {
       const dot = document.createElement("div");
       dot.className = "picker-hint";
       dot.title = hint.label;
@@ -115,7 +117,7 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       />
       <div className="dim small">
         {pos ? "Drag the pin to adjust." : "Click the map to drop a pin."}
-        {hint && !initial && <> The grey dot is {hint.label}.</>}
+        {hint && <> The grey dot is {hint.label}.</>}
       </div>
       {error && <div className="error">{error}</div>}
       <div className="row">

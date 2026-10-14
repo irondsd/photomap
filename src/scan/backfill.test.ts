@@ -56,6 +56,16 @@ describe("burst", () => {
   });
 });
 
+describe("untrustworthy times", () => {
+  test("a GPS photo without a usable date is never evidence", () => {
+    const bogus = { id: nextId++, t: NaN, offset: null, lat: PARIS.lat, lon: PARIS.lon };
+    const p = at(0);
+    const r = infer([bogus, p]);
+    expect(r.proposals).toEqual([]);
+    expect(r.skipped[0]).toMatchObject({ id: p.id, reason: "no-neighbours" });
+  });
+});
+
 describe("stay", () => {
   test("same place before and after within a day", () => {
     const a = at(0, PARIS.lat, PARIS.lon);
@@ -64,6 +74,13 @@ describe("stay", () => {
     const [r] = infer([a, p, b]).proposals;
     expect(r).toMatchObject({ rule: "stay", confidence: "high" });
     expect(r!.lat).toBeCloseTo(PARIS.lat + 0.0005, 6);
+  });
+
+  test("a long stay (evening to morning) is only a low-confidence guess", () => {
+    const a = at(0, PARIS.lat, PARIS.lon);
+    const p = at(8 * hour);
+    const b = at(14 * hour, PARIS.lat, PARIS.lon);
+    expect(infer([a, p, b]).proposals[0]).toMatchObject({ rule: "stay", confidence: "low" });
   });
 
   test("different places before and after are skipped as moving", () => {
