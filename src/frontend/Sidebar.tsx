@@ -17,7 +17,13 @@ const TARGET_CELL = 112;
 const GAP = 3;
 const OVERSCAN_ROWS = 3;
 
-function Grid({ points, list, onOpen, onHover, empty }: {
+function Grid({
+  points,
+  list,
+  onOpen,
+  onHover,
+  empty,
+}: {
   points: Points;
   list: Int32Array;
   onOpen(list: Int32Array, index: number): void;
@@ -68,7 +74,14 @@ function Grid({ points, list, onOpen, onHover, empty }: {
           onMouseLeave={() => onHover(null)}
           title={Number.isNaN(t) ? "Unknown date" : formatDate(t)}
         >
-          <img src={`/thumbs/s/${points.id[i]}`} alt="" loading="lazy" decoding="async" draggable={false} onError={(e) => e.currentTarget.classList.add("broken")} />
+          <img
+            src={`/thumbs/s/${points.id[i]}`}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onError={(e) => e.currentTarget.classList.add("broken")}
+          />
           {points.kind[i] === 2 && <span className="cell-video">▶</span>}
         </button>,
       );
@@ -114,7 +127,11 @@ export function Sidebar(props: SidebarProps) {
         list={list}
         onOpen={props.onOpen}
         onHover={props.onHover}
-        empty={tab === "map" ? "No geotagged photos here. Zoom out or widen the time range." : "Every photo in this range has a location."}
+        empty={
+          tab === "map"
+            ? "No geotagged photos here. Zoom out or widen the time range."
+            : "Every photo in this range has a location."
+        }
       />
     </aside>
   );

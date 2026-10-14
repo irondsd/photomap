@@ -1,5 +1,14 @@
 import { test, expect, describe } from "bun:test";
-import { parseDateString, parseOffset, offsetFromGps, dateFromFilename, epochFromFilename, resolveTime, zoneOffsetAtWall, relocalize } from "./datetime";
+import {
+  parseDateString,
+  parseOffset,
+  offsetFromGps,
+  dateFromFilename,
+  epochFromFilename,
+  resolveTime,
+  zoneOffsetAtWall,
+  relocalize,
+} from "./datetime";
 
 const wall = (s: string) => Date.parse(s + "Z") / 1000;
 
@@ -65,12 +74,18 @@ describe("resolveTime priority", () => {
     expect(r).toEqual({ local: wall("2019-06-12T14:22:01"), offset: 60, source: "exif+geotz" });
   });
   test("falls back to CreateDate when DateTimeOriginal is junk", () => {
-    const r = resolveTime({ ...base, exif: { DateTimeOriginal: "0000:00:00 00:00:00", CreateDate: "2018:01:02 03:04:05" } });
+    const r = resolveTime({
+      ...base,
+      exif: { DateTimeOriginal: "0000:00:00 00:00:00", CreateDate: "2018:01:02 03:04:05" },
+    });
     expect(r?.source).toBe("exif");
     expect(r?.local).toBe(wall("2018-01-02T03:04:05"));
   });
   test("apple video creationdate", () => {
-    const r = resolveTime({ ...base, video: { creationDate: "2019-06-12T21:31:34+0300", creationTime: "2019-06-12T18:31:34.000000Z" } });
+    const r = resolveTime({
+      ...base,
+      video: { creationDate: "2019-06-12T21:31:34+0300", creationTime: "2019-06-12T18:31:34.000000Z" },
+    });
     expect(r).toEqual({ local: wall("2019-06-12T21:31:34"), offset: 180, source: "video+offset" });
   });
   test("video UTC creation_time converted with geo zone", () => {
@@ -92,11 +107,19 @@ describe("relocalize", () => {
   });
   test("EXIF wall time keeps its clock and gains the offset", () => {
     const before = { local: wall("2019-07-14T15:00:00"), offset: null, source: "exif" as const };
-    expect(relocalize(before, ...ATHENS)).toEqual({ local: wall("2019-07-14T15:00:00"), offset: 180, source: "exif+geotz" });
+    expect(relocalize(before, ...ATHENS)).toEqual({
+      local: wall("2019-07-14T15:00:00"),
+      offset: 180,
+      source: "exif+geotz",
+    });
   });
   test("removing the location undoes the EXIF offset", () => {
     const tagged = { local: wall("2019-07-14T15:00:00"), offset: 180, source: "exif+geotz" as const };
-    expect(relocalize(tagged, null, null)).toEqual({ local: wall("2019-07-14T15:00:00"), offset: null, source: "exif" });
+    expect(relocalize(tagged, null, null)).toEqual({
+      local: wall("2019-07-14T15:00:00"),
+      offset: null,
+      source: "exif",
+    });
   });
   test("an embedded offset is never changed", () => {
     const t = { local: wall("2019-07-14T15:00:00"), offset: 180, source: "exif+offset" as const };
@@ -116,30 +139,55 @@ describe("dates without a camera clock", () => {
 
   test("GPS clock is used when there's no camera date", () => {
     // 12:00:00 UTC in Paris in July = 14:00 local (UTC+2).
-    const r = resolveTime({ name: "x.jpg", mtimeMs: 0, lat: 48.8584, lon: 2.2945, exif: { GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] } });
+    const r = resolveTime({
+      name: "x.jpg",
+      mtimeMs: 0,
+      lat: 48.8584,
+      lon: 2.2945,
+      exif: { GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] },
+    });
     expect(r).toEqual({ local: wall("2019-07-14T14:00:00"), offset: 120, source: "gps" });
   });
 
   test("a camera date still wins over the GPS clock", () => {
-    const r = resolveTime({ name: "x.jpg", mtimeMs: 0, exif: { DateTimeOriginal: "2019:07:14 14:00:05", GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] } });
+    const r = resolveTime({
+      name: "x.jpg",
+      mtimeMs: 0,
+      exif: { DateTimeOriginal: "2019:07:14 14:00:05", GPSDateStamp: "2019:07:14", GPSTimeStamp: [12, 0, 0] },
+    });
     expect(r?.source).toBe("exif+gps");
   });
 
   test("filename timestamp beats the file's modified time", () => {
-    const r = resolveTime({ name: "FB_IMG_1501315576710.jpg", mtimeMs: Date.parse("2026-10-12T00:00:00Z"), lat: 48.8584, lon: 2.2945 });
+    const r = resolveTime({
+      name: "FB_IMG_1501315576710.jpg",
+      mtimeMs: Date.parse("2026-10-12T00:00:00Z"),
+      lat: 48.8584,
+      lon: 2.2945,
+    });
     expect(r).toEqual({ local: 1501315576 + 120 * 60, offset: 120, source: "filename-utc" });
   });
 });
 
 test("a GPS date with a garbage time still gives the day", () => {
   // HTC Desire S: the time field holds a copy of the longitude.
-  const r = resolveTime({ name: "IMAG0178-edited.jpg", mtimeMs: 0, lat: 56.84, lon: 35.91, exif: { GPSDateStamp: "2012:08:07", GPSTimeStamp: [35, 54, 50.43] } });
+  const r = resolveTime({
+    name: "IMAG0178-edited.jpg",
+    mtimeMs: 0,
+    lat: 56.84,
+    lon: 35.91,
+    exif: { GPSDateStamp: "2012:08:07", GPSTimeStamp: [35, 54, 50.43] },
+  });
   expect(r).toEqual({ local: wall("2012-08-07T12:00:00"), offset: 240, source: "gps-date" });
 });
 
 describe("placeholder dates", () => {
   test("Picasa's 2002-12-08 placeholder loses to the date in the file name", () => {
-    const r = resolveTime({ name: "IMG_20161203_193220.jpg", mtimeMs: 0, exif: { CreateDate: "2002:12:08 12:00:00", ModifyDate: "2016:10:06 19:27:05" } });
+    const r = resolveTime({
+      name: "IMG_20161203_193220.jpg",
+      mtimeMs: 0,
+      exif: { CreateDate: "2002:12:08 12:00:00", ModifyDate: "2016:10:06 19:27:05" },
+    });
     expect(r?.source).toBe("filename");
     expect(r?.local).toBe(wall("2016-12-03T19:32:20"));
   });
@@ -150,12 +198,20 @@ describe("placeholder dates", () => {
   });
 
   test("a capture date still beats the file name", () => {
-    const r = resolveTime({ name: "IMG_20161203_193220.jpg", mtimeMs: 0, exif: { DateTimeOriginal: "2016:12:03 19:32:21" } });
+    const r = resolveTime({
+      name: "IMG_20161203_193220.jpg",
+      mtimeMs: 0,
+      exif: { DateTimeOriginal: "2016:12:03 19:32:21" },
+    });
     expect(r?.source).toBe("exif");
   });
 
   test("the placeholder alone is ignored entirely", () => {
-    const r = resolveTime({ name: "DSC0001.jpg", mtimeMs: Date.parse("2020-01-01T00:00:00Z"), exif: { CreateDate: "2002:12:08 12:00:00" } });
+    const r = resolveTime({
+      name: "DSC0001.jpg",
+      mtimeMs: Date.parse("2020-01-01T00:00:00Z"),
+      exif: { CreateDate: "2002:12:08 12:00:00" },
+    });
     expect(r?.source).toBe("mtime");
   });
 });

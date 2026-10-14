@@ -57,6 +57,7 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       mapRef.current = null;
       pin.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once; later changes go through the effects below.
   }, []);
 
   // Keep the draggable pin in sync with the chosen position.
@@ -69,7 +70,10 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
       return;
     }
     if (!pin.current) {
-      pin.current = new Marker({ color: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#e8590c", draggable: true });
+      pin.current = new Marker({
+        color: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#e8590c",
+        draggable: true,
+      });
       pin.current.on("dragend", () => {
         const ll = pin.current!.getLngLat();
         placeFromMap({ lat: ll.lat, lon: ll.lng });

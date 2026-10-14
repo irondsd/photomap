@@ -87,9 +87,7 @@ export function BulkLocationDialog({ points, ids, indexOf, onClose, onDone }: Bu
           {indices.length > STRIP && <span className="bulk-more">+{nf.format(indices.length - STRIP)}</span>}
         </div>
         {overridden.length > 0 && (
-          <p className="note">
-            {overridden.join(", ")} will be overridden. Reset brings back what the files say.
-          </p>
+          <p className="note">{overridden.join(", ")} will be overridden. Reset brings back what the files say.</p>
         )}
         <LocationPicker initial={null} hint={hint} onSave={save} onCancel={onClose} />
       </div>

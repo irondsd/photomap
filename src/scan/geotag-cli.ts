@@ -59,7 +59,9 @@ interface Row {
   src: string | null;
 }
 const rows = db
-  .query<Row, []>(`SELECT id, name, taken_local t, tz_offset offset, gps_source src FROM photos WHERE missing = 0 AND taken_local IS NOT NULL`)
+  .query<Row, []>(
+    `SELECT id, name, taken_local t, tz_offset offset, gps_source src FROM photos WHERE missing = 0 AND taken_local IS NOT NULL`,
+  )
   .all();
 
 let picked: Row[];
@@ -78,7 +80,9 @@ if (loc) {
 }
 
 const assignable = (r: Row) => r.src == null || r.src === "manual" || r.src.startsWith("inferred:");
-const targets = (clear ? picked.filter((r) => r.src === "manual") : picked.filter(assignable)).sort((a, b) => a.t - b.t);
+const targets = (clear ? picked.filter((r) => r.src === "manual") : picked.filter(assignable)).sort(
+  (a, b) => a.t - b.t,
+);
 const realGps = picked.filter((r) => !assignable(r)).length;
 
 const fmt = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
