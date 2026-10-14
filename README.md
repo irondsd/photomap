@@ -21,11 +21,14 @@ You can also start the server with an empty index and add folders from the UI (*
 | `bun run backfill --apply=high\|medium\|low` | Write those estimates to the index at or above a confidence; files are never touched. `--undo` removes them |
 | `bun run geotag <lat, lon> <from> [to]` | Tag photos without GPS taken in a time range (local time at that place), e.g. `bun run geotag 48.8584, 2.2945 2019-07-14` or `… "2019-07-14 15:00" "2019-07-14 15:30"`. Coordinates paste straight from Google Maps. `--dry-run` previews, `--clear` removes manual tags. Manual tags survive rescans |
 | `bun run start` | Run the server without watch mode |
-| `bun test` / `bun run typecheck` | Tests / types |
+| `bun test` | Run the tests |
+| `bun run typecheck` | Type check (`bun check`) |
+| `bun lint` / `bun lint --fix` | Lint, optionally applying the safe fixes. It's Bun's built-in command; there's no `lint` script because one would shadow it |
+| `bun run format` / `bun run format:check` | Format the codebase (`bun fmt`, Prettier-compatible, configured in `.prettierrc.json`), or only check it |
 
 Environment: `PORT` (default 3000), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
 
-**Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames. On macOS, HEIC and RAW files are decoded with the built-in `sips`.
+**Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames. The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
 
 ## Using it
 

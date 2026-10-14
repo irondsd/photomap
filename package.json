@@ -10,7 +10,9 @@
     "backfill": "bun src/scan/backfill-cli.ts",
     "geotag": "bun src/scan/geotag-cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun check",
+    "format": "bun fmt",
+    "format:check": "bun fmt --check"
   },
   "dependencies": {
     "@rapideditor/country-coder": "^5.6.1",
