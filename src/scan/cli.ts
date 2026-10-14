@@ -29,7 +29,11 @@ try {
   targets = folders.length ? folders.map(registerTarget) : getRoots().map((root) => ({ root, subdir: null }));
 } catch (err) {
   const msg = (err as Error).message;
-  fail(msg.startsWith("Folder not found") ? `${msg}\n       (paths with spaces need quotes: bun run scan "~/Pictures/My Photos")` : msg);
+  fail(
+    msg.startsWith("Folder not found")
+      ? `${msg}\n       (paths with spaces need quotes: bun run scan "~/Pictures/My Photos")`
+      : msg,
+  );
 }
 if (!targets.length) fail("No folders registered. Usage: bun run scan ~/Pictures [--thumbs]");
 
@@ -69,8 +73,18 @@ Library
   date range  ${date(s.range.min)} → ${date(s.range.max)}
   kinds       ${s.kinds.map((k) => `${k.kind} ${k.n}`).join(", ")}
   time from   ${s.timeSources.map((t) => `${t.source ?? "none"} ${t.n}`).join(", ")}
-  countries   ${s.countries.slice(0, 12).map((c) => `${c.name} ${c.n}`).join(", ") || "—"}
-  cameras     ${s.cameras.slice(0, 8).map((c) => `${c.model} ${c.n}`).join(", ") || "—"}`);
+  countries   ${
+    s.countries
+      .slice(0, 12)
+      .map((c) => `${c.name} ${c.n}`)
+      .join(", ") || "—"
+  }
+  cameras     ${
+    s.cameras
+      .slice(0, 8)
+      .map((c) => `${c.model} ${c.n}`)
+      .join(", ") || "—"
+  }`);
 
 if (withThumbs) {
   console.log("\nGenerating thumbnails…");

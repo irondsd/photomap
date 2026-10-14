@@ -126,7 +126,9 @@ export function addUnit(t: number, unit: Unit, n = 1): number {
     case "week":
       return t + n * 7 * 86400;
     case "day":
-      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n, d.getUTCHours(), d.getUTCMinutes()) / 1000;
+      return (
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n, d.getUTCHours(), d.getUTCMinutes()) / 1000
+      );
     case "hour":
       return t + n * 3600;
   }
@@ -149,7 +151,8 @@ export const formatDate = (t: number) => fmt({ year: "numeric", month: "short", 
 export const formatDateTime = (t: number) =>
   fmt({ year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(t * 1000);
 export const formatMonth = (t: number) => fmt({ year: "numeric", month: "short" }).format(t * 1000);
-export const formatDayHeader = (t: number) => fmt({ weekday: "short", year: "numeric", month: "short", day: "numeric" }).format(t * 1000);
+export const formatDayHeader = (t: number) =>
+  fmt({ weekday: "short", year: "numeric", month: "short", day: "numeric" }).format(t * 1000);
 export const formatMonthShort = (t: number) => fmt({ month: "short" }).format(t * 1000);
 export const formatDayShort = (t: number) => fmt({ month: "short", day: "numeric" }).format(t * 1000);
 export const formatHour = (t: number) => fmt({ hour: "2-digit", minute: "2-digit" }).format(t * 1000);
@@ -203,7 +206,11 @@ function formatGap(seconds: number) {
  * The geotagged photo closest in time to point i, as a starting point for placing it.
  * `skip` excludes photos whose location is being replaced (e.g. the rest of a selection).
  */
-export function nearestTagged(points: Points, i: number, skip?: (j: number) => boolean): { at: { lat: number; lon: number }; label: string } | null {
+export function nearestTagged(
+  points: Points,
+  i: number,
+  skip?: (j: number) => boolean,
+): { at: { lat: number; lon: number }; label: string } | null {
   const t = points.t[i]!;
   if (Number.isNaN(t)) return null;
   let best = -1;

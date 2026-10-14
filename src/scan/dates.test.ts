@@ -138,19 +138,36 @@ describe("dates that contradict their folder", () => {
   const day = 24 * H;
 
   test("a correctly dated twin of the same shot wins (a TIF converted years later)", () => {
-    const jpg = row("IMG_1938.JPG", Date.UTC(2011, 4, 28, 14, 53) / 1000, "exif", { dir: "/lib/Photos from 2011", model: "Canon EOS 500D" });
-    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27, 10, 46) / 1000, "exif", { dir: "/lib/Photos from 2019", model: "Canon EOS 500D" });
+    const jpg = row("IMG_1938.JPG", Date.UTC(2011, 4, 28, 14, 53) / 1000, "exif", {
+      dir: "/lib/Photos from 2011",
+      model: "Canon EOS 500D",
+    });
+    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27, 10, 46) / 1000, "exif", {
+      dir: "/lib/Photos from 2019",
+      model: "Canon EOS 500D",
+    });
     expect(fixFor([jpg, tif], tif)).toMatchObject({ source: "original", local: jpg.t });
   });
 
   test("another camera's file with the same name is not a twin", () => {
-    const other = row("IMG_1938.JPG", Date.UTC(2011, 4, 28) / 1000, "exif", { dir: "/lib/Photos from 2011", model: "iPhone 4" });
-    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27) / 1000, "exif", { dir: "/lib/Photos from 2019", model: "Canon EOS 500D" });
+    const other = row("IMG_1938.JPG", Date.UTC(2011, 4, 28) / 1000, "exif", {
+      dir: "/lib/Photos from 2011",
+      model: "iPhone 4",
+    });
+    const tif = row("IMG_1938.tif", Date.UTC(2009, 8, 27) / 1000, "exif", {
+      dir: "/lib/Photos from 2019",
+      model: "Canon EOS 500D",
+    });
     expect(fixFor([other, tif], tif)?.source).toBe("folder");
   });
 
   test("otherwise the folder year wins, keeping a burst in order", () => {
-    const shots = [0, 7, 11].map((s, k) => row(`DSC_${1156 + k}.jpg`, Date.UTC(2011, 3, 4, 17, 10) / 1000 + s, "exif", { dir: "/lib/Photos from 2020", model: "NIKON D3100" }));
+    const shots = [0, 7, 11].map((s, k) =>
+      row(`DSC_${1156 + k}.jpg`, Date.UTC(2011, 3, 4, 17, 10) / 1000 + s, "exif", {
+        dir: "/lib/Photos from 2020",
+        model: "NIKON D3100",
+      }),
+    );
     // Another contradicted photo in the same folder, years apart, mustn't disturb the burst.
     const collage = row("IMG_0897-COLLAGE.jpg", Date.UTC(2010, 7, 5) / 1000, "exif", { dir: "/lib/Photos from 2020" });
     const fixes = inferDates([...shots, collage], machine);
@@ -163,8 +180,14 @@ describe("dates that contradict their folder", () => {
   });
 
   test("a collage is a new image, never a twin of its first photo", () => {
-    const orig = row("IMG_20160422_143639.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", { dir: "/lib/Photos from 2016", model: "Pixel" });
-    const collage = row("IMG_20160422_143639-COLLAGE.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", { dir: "/lib/Photos from 2018", model: "Pixel" });
+    const orig = row("IMG_20160422_143639.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", {
+      dir: "/lib/Photos from 2016",
+      model: "Pixel",
+    });
+    const collage = row("IMG_20160422_143639-COLLAGE.jpg", Date.UTC(2016, 3, 22) / 1000, "exif", {
+      dir: "/lib/Photos from 2018",
+      model: "Pixel",
+    });
     expect(fixFor([orig, collage], collage)?.source).toBe("folder");
   });
 

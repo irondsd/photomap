@@ -12,19 +12,19 @@ bun run dev                    # http://localhost:3000
 
 You can also start the server with an empty index and add folders from the UI (**Library → Add & scan**).
 
-| Command | What it does |
-|---|---|
-| `bun run scan <folder…>` | Register folders and index them; prints library stats. A subfolder of an indexed folder rescans just that part; a parent folder absorbs the indexed folders inside it. Quote paths with spaces (unquoted ones are rejoined when unambiguous) |
-| `bun run scan` | Rescan every registered folder (only new or changed files are read) |
-| `bun run scan --thumbs` | Also pre-generate every grid thumbnail |
-| `bun run backfill [-v]` | Dry run: estimate locations for photos without GPS from photos taken around them (bursts, same spot before and after, home, nearby) |
-| `bun run backfill --apply=high\|medium\|low` | Write those estimates to the index at or above a confidence; files are never touched. `--undo` removes them |
-| `bun run geotag <lat, lon> <from> [to]` | Tag photos without GPS taken in a time range (local time at that place), e.g. `bun run geotag 48.8584, 2.2945 2019-07-14` or `… "2019-07-14 15:00" "2019-07-14 15:30"`. Coordinates paste straight from Google Maps. `--dry-run` previews, `--clear` removes manual tags. Manual tags survive rescans |
-| `bun run start` | Run the server without watch mode |
-| `bun test` | Run the tests |
-| `bun run typecheck` | Type check (`bun check`) |
-| `bun lint` / `bun lint --fix` | Lint, optionally applying the safe fixes. It's Bun's built-in command; there's no `lint` script because one would shadow it |
-| `bun run format` / `bun run format:check` | Format the codebase (`bun fmt`, Prettier-compatible, configured in `.prettierrc.json`), or only check it |
+| Command                                      | What it does                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run scan <folder…>`                     | Register folders and index them; prints library stats. A subfolder of an indexed folder rescans just that part; a parent folder absorbs the indexed folders inside it. Quote paths with spaces (unquoted ones are rejoined when unambiguous)                                                          |
+| `bun run scan`                               | Rescan every registered folder (only new or changed files are read)                                                                                                                                                                                                                                   |
+| `bun run scan --thumbs`                      | Also pre-generate every grid thumbnail                                                                                                                                                                                                                                                                |
+| `bun run backfill [-v]`                      | Dry run: estimate locations for photos without GPS from photos taken around them (bursts, same spot before and after, home, nearby)                                                                                                                                                                   |
+| `bun run backfill --apply=high\|medium\|low` | Write those estimates to the index at or above a confidence; files are never touched. `--undo` removes them                                                                                                                                                                                           |
+| `bun run geotag <lat, lon> <from> [to]`      | Tag photos without GPS taken in a time range (local time at that place), e.g. `bun run geotag 48.8584, 2.2945 2019-07-14` or `… "2019-07-14 15:00" "2019-07-14 15:30"`. Coordinates paste straight from Google Maps. `--dry-run` previews, `--clear` removes manual tags. Manual tags survive rescans |
+| `bun run start`                              | Run the server without watch mode                                                                                                                                                                                                                                                                     |
+| `bun test`                                   | Run the tests                                                                                                                                                                                                                                                                                         |
+| `bun run typecheck`                          | Type check (`bun check`)                                                                                                                                                                                                                                                                              |
+| `bun lint` / `bun lint --fix`                | Lint, optionally applying the safe fixes. It's Bun's built-in command; there's no `lint` script because one would shadow it                                                                                                                                                                           |
+| `bun run format` / `bun run format:check`    | Format the codebase (`bun fmt`, Prettier-compatible, configured in `.prettierrc.json`), or only check it                                                                                                                                                                                              |
 
 Environment: `PORT` (default 3000), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
 
@@ -60,7 +60,7 @@ scan ──► SQLite index (bun:sqlite) ──► Bun.serve ──► React + M
   - Walks the folders, skipping hidden folders, `.photoslibrary` and `.lrdata`. Reads EXIF with `exifr` and video tags with `ffprobe`.
   - Unchanged files (same size and mtime) are skipped, and deleted files are marked missing.
   - Countries come from an offline lookup with `country-coder`.
-- **Dates** (`src/scan/datetime.ts`): stored as *wall-clock time where the photo was taken*, plus the UTC offset when known. The offset comes from, in order of preference:
+- **Dates** (`src/scan/datetime.ts`): stored as _wall-clock time where the photo was taken_, plus the UTC offset when known. The offset comes from, in order of preference:
   1. EXIF offset tags
   2. the GPS UTC timestamp
   3. the time zone at the GPS position
@@ -84,6 +84,7 @@ scan ──► SQLite index (bun:sqlite) ──► Bun.serve ──► React + M
   5. the year in a Google Takeout folder name ("Photos from 2012").
 
   Each photo records which source was used. The viewer flags estimates, and the gallery puts year-only photos under "2012 · Date unknown". When extraction improves, `EXTRACTOR_VERSION` in `scanner.ts` makes the next scan re-read every file once.
+
 - **Client:** the browser downloads one compact binary array (about 30 bytes per photo) and does clustering (`supercluster`, in a Web Worker) and timeline counts locally, so filtering never waits on the server.
 - **Thumbnails:** generated by `sharp`, falling back to `sips` and `ffmpeg`. They're cached under `data/thumbs` and generated on demand plus in the background after scans.
 - **Security:** the server binds to localhost, rejects foreign `Host` headers and cross-site writes, and only serves files that are in the index.

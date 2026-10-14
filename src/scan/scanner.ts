@@ -1,7 +1,19 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative, dirname, extname, basename } from "node:path";
 import { CPUS, kindOf, skipDir, type Kind } from "../config";
-import { db, getMeta, setMeta, knownFiles, markMissing, nextScanGen, setRootScanned, touchPhoto, upsertPhoto, type PhotoInsert, type RootRow } from "../db";
+import {
+  db,
+  getMeta,
+  setMeta,
+  knownFiles,
+  markMissing,
+  nextScanGen,
+  setRootScanned,
+  touchPhoto,
+  upsertPhoto,
+  type PhotoInsert,
+  type RootRow,
+} from "../db";
 import { extract } from "./extract";
 import { keepAssignedLocation } from "./locate";
 import { applyDateInference } from "./fixDates";
@@ -30,9 +42,19 @@ export interface ScanStatus {
 }
 
 export const status: ScanStatus = {
-  running: false, root: null, phase: "idle",
-  found: 0, processed: 0, added: 0, updated: 0, unchanged: 0, removed: 0, errors: 0,
-  startedAt: null, finishedAt: null, message: null,
+  running: false,
+  root: null,
+  phase: "idle",
+  found: 0,
+  processed: 0,
+  added: 0,
+  updated: 0,
+  unchanged: 0,
+  removed: 0,
+  errors: 0,
+  startedAt: null,
+  finishedAt: null,
+  message: null,
 };
 
 let cancelRequested = false;
@@ -101,13 +123,27 @@ async function pool<T>(items: T[], concurrency: number, fn: (item: T) => Promise
 export type ProgressFn = (s: ScanStatus) => void;
 
 /** Scans a root, or only `subdir` inside it. */
-export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: string | null = null): Promise<ScanStatus> {
+export async function scanRoot(
+  root: RootRow,
+  onProgress?: ProgressFn,
+  subdir: string | null = null,
+): Promise<ScanStatus> {
   if (status.running) throw new Error("A scan is already running");
   cancelRequested = false;
   Object.assign(status, {
-    running: true, root: subdir ?? root.path, phase: "walking",
-    found: 0, processed: 0, added: 0, updated: 0, unchanged: 0, removed: 0, errors: 0,
-    startedAt: Date.now(), finishedAt: null, message: null,
+    running: true,
+    root: subdir ?? root.path,
+    phase: "walking",
+    found: 0,
+    processed: 0,
+    added: 0,
+    updated: 0,
+    unchanged: 0,
+    removed: 0,
+    errors: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+    message: null,
   } satisfies ScanStatus);
   const report = () => onProgress?.(status);
 
@@ -154,7 +190,12 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
           // A location set by hand wins over the file's own GPS, and survives the file changing.
           if (prev?.gps_source === "manual" && prev.lat != null && prev.lon != null) {
             meta = keepAssignedLocation(meta, prev.lat, prev.lon);
-          } else if (prev?.gps_source?.startsWith("inferred:") && meta.lat == null && prev.lat != null && prev.lon != null) {
+          } else if (
+            prev?.gps_source?.startsWith("inferred:") &&
+            meta.lat == null &&
+            prev.lat != null &&
+            prev.lon != null
+          ) {
             // Still no GPS in the file: keep the backfill's estimate (the next backfill run refreshes it).
             meta = keepAssignedLocation(meta, prev.lat, prev.lon, prev.gps_source as `inferred:${string}`);
           }
@@ -171,7 +212,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
             scan_gen: gen,
             ...meta,
           });
-          if (prev && prev.size === st.size && prev.mtime === mtime) status.unchanged++; // only re-read for a date
+          if (prev && prev.size === st.size && prev.mtime === mtime)
+            status.unchanged++; // only re-read for a date
           else if (prev) status.updated++;
           else status.added++;
         }

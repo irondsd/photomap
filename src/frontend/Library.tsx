@@ -55,11 +55,17 @@ export function ScanProgress({ scan }: { scan: ScanStatus }) {
   return (
     <div className="scan-progress">
       <div className="scan-progress-text">
-        {scan.phase === "walking" ? `Looking for photos… ${nf.format(scan.found)} found` : `Indexing ${nf.format(scan.processed)} of ${nf.format(scan.found)}`}
+        {scan.phase === "walking"
+          ? `Looking for photos… ${nf.format(scan.found)} found`
+          : `Indexing ${nf.format(scan.processed)} of ${nf.format(scan.found)}`}
         {scan.queued > 0 && <span className="dim"> · {scan.queued} more folder(s) queued</span>}
       </div>
       <div className="progress">
-        <div className="progress-fill" style={{ width: scan.phase === "walking" ? "100%" : `${pct}%` }} data-indeterminate={scan.phase === "walking" || undefined} />
+        <div
+          className="progress-fill"
+          style={{ width: scan.phase === "walking" ? "100%" : `${pct}%` }}
+          data-indeterminate={scan.phase === "walking" || undefined}
+        />
       </div>
       <div className="dim small break">{scan.root}</div>
     </div>
@@ -106,9 +112,22 @@ export function AddFolder({ onAdded, autoFocus }: { onAdded(): void; autoFocus?:
   );
 }
 
-export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | null; scan: ScanStatus | null; onClose(): void; onChanged(): void }) {
+export function Library({
+  stats,
+  scan,
+  onClose,
+  onChanged,
+}: {
+  stats: Stats | null;
+  scan: ScanStatus | null;
+  onClose(): void;
+  onChanged(): void;
+}) {
   const [roots, setRoots] = useState<Root[]>([]);
-  const reload = () => api<Root[]>("/api/roots").then(setRoots).catch(() => {});
+  const reload = () =>
+    api<Root[]>("/api/roots")
+      .then(setRoots)
+      .catch(() => {});
   useEffect(() => {
     reload();
   }, [scan?.running, stats?.version]);
@@ -120,7 +139,8 @@ export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | nu
   }, [onClose]);
 
   const remove = async (r: Root) => {
-    if (!confirm(`Remove ${r.path} from the index?\n\nYour files are not touched; only the index entries are removed.`)) return;
+    if (!confirm(`Remove ${r.path} from the index?\n\nYour files are not touched; only the index entries are removed.`))
+      return;
     try {
       await api(`/api/roots/${r.id}`, { method: "DELETE" });
     } catch (err) {
@@ -148,9 +168,15 @@ export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | nu
             {roots.map((r) => (
               <li key={r.id}>
                 <div className="break mono small">{r.path}</div>
-                <div className="dim small">{r.last_scan_at ? `Scanned ${new Date(r.last_scan_at).toLocaleString()}` : "Not scanned yet"}</div>
+                <div className="dim small">
+                  {r.last_scan_at ? `Scanned ${new Date(r.last_scan_at).toLocaleString()}` : "Not scanned yet"}
+                </div>
                 <div className="row">
-                  <button className="btn btn-small" disabled={scan?.running} onClick={() => startScan(r.id).then(onChanged)}>
+                  <button
+                    className="btn btn-small"
+                    disabled={scan?.running}
+                    onClick={() => startScan(r.id).then(onChanged)}
+                  >
                     Rescan
                   </button>
                   <button className="btn btn-small btn-danger" onClick={() => remove(r)}>
@@ -160,8 +186,15 @@ export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | nu
               </li>
             ))}
           </ul>
-          <AddFolder onAdded={() => { reload(); onChanged(); }} />
-          <p className="dim small">Your photos are only read, never modified. The index and thumbnails live in the app's data folder.</p>
+          <AddFolder
+            onAdded={() => {
+              reload();
+              onChanged();
+            }}
+          />
+          <p className="dim small">
+            Your photos are only read, never modified. The index and thumbnails live in the app's data folder.
+          </p>
           {scan?.running ? (
             <>
               <ScanProgress scan={scan} />
@@ -178,7 +211,8 @@ export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | nu
           )}
           {scan && !scan.running && scan.phase === "done" && (
             <p className="dim small">
-              Last scan: {nf.format(scan.added)} added, {nf.format(scan.updated)} updated, {nf.format(scan.removed)} gone, {nf.format(scan.errors)} unreadable
+              Last scan: {nf.format(scan.added)} added, {nf.format(scan.updated)} updated, {nf.format(scan.removed)}{" "}
+              gone, {nf.format(scan.errors)} unreadable
             </p>
           )}
         </section>
@@ -194,7 +228,11 @@ export function Library({ stats, scan, onClose, onChanged }: { stats: Stats | nu
                 {nf.format(stats.geotagged)} <span className="dim">{pct(stats.geotagged)}</span>
               </dd>
               <dt>Date range</dt>
-              <dd>{stats.range.min != null && stats.range.max != null ? `${formatDate(stats.range.min)} – ${formatDate(stats.range.max)}` : "—"}</dd>
+              <dd>
+                {stats.range.min != null && stats.range.max != null
+                  ? `${formatDate(stats.range.min)} – ${formatDate(stats.range.max)}`
+                  : "—"}
+              </dd>
               {stats.kinds.map((k) => (
                 <div key={k.kind} className="stats-row">
                   <dt>{k.kind === "photo" ? "Photos" : k.kind === "raw" ? "RAW" : "Videos"}</dt>

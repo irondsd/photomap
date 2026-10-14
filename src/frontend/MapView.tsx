@@ -126,7 +126,11 @@ export function MapView(props: MapViewProps) {
         const badge = document.createElement("span");
         badge.className = "pm-badge";
         el.appendChild(badge);
-        const created: Entry = { el, cluster: c, marker: new Marker({ element: el, anchor: "center" }).setLngLat([c.lon, c.lat]).addTo(map) };
+        const created: Entry = {
+          el,
+          cluster: c,
+          marker: new Marker({ element: el, anchor: "center" }).setLngLat([c.lon, c.lat]).addTo(map),
+        };
         el.addEventListener("click", (ev) => {
           ev.stopPropagation();
           cb.current.onClusterClick(created.cluster);
@@ -147,7 +151,8 @@ export function MapView(props: MapViewProps) {
       }
       const badge = entry.el.lastChild as HTMLSpanElement;
       const isVideo = c.count === 1 && points.kind[c.rep] === 2;
-      badge.textContent = c.count > 1 ? (c.count >= 10000 ? `${Math.round(c.count / 1000)}k` : nf.format(c.count)) : isVideo ? "▶" : "";
+      badge.textContent =
+        c.count > 1 ? (c.count >= 10000 ? `${Math.round(c.count / 1000)}k` : nf.format(c.count)) : isVideo ? "▶" : "";
       badge.hidden = !badge.textContent;
       entry.el.title = c.count > 1 ? `${nf.format(c.count)} photos` : "";
     }

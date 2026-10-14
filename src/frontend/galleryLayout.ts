@@ -100,7 +100,8 @@ export function buildLayout(p: Points, order: Int32Array, width: number, left = 
 
     if (groups.length) top += GROUP_GAP;
     const gi = groups.length;
-    const label = key === "none" ? "Date unknown" : key[0] === "y" ? `${key.slice(1)} · Date unknown` : formatDayHeader(t0);
+    const label =
+      key === "none" ? "Date unknown" : key[0] === "y" ? `${key.slice(1)} · Date unknown` : formatDayHeader(t0);
     groups.push({ y: top, start: k, end, t: t0, label, places });
     top += HEADER_H;
 

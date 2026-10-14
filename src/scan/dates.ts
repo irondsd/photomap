@@ -70,7 +70,8 @@ export function folderYear(dir: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-const exact = (r: DateRow) => r.t != null && !INFERRED_DATE_SOURCES.has(r.source ?? "mtime") && !VAGUE_DATE_SOURCES.has(r.source ?? "");
+const exact = (r: DateRow) =>
+  r.t != null && !INFERRED_DATE_SOURCES.has(r.source ?? "mtime") && !VAGUE_DATE_SOURCES.has(r.source ?? "");
 
 /** A date from another year than its folder's, and not just across New Year. */
 export function contradictsFolder(t: number, year: number): boolean {
@@ -85,7 +86,10 @@ const isDerived = (name: string) => /-collage(?=\.[^.]+$)/i.test(name);
 
 /** "IMG_1938.tif", "IMG_1938-edited(1).JPG" → "img_1938": the same shot in any format. */
 const shotStem = (name: string) =>
-  name.replace(/(?:-edited|~\d+|\(\d+\))+(?=\.[^.]+$)/gi, "").replace(/\.[^.]+$/, "").toLowerCase();
+  name
+    .replace(/(?:-edited|~\d+|\(\d+\))+(?=\.[^.]+$)/gi, "")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase();
 
 export function inferDates(rows: DateRow[], machineOffset: (utcMs: number) => number): DateFix[] {
   const fixes: DateFix[] = [];
@@ -147,7 +151,13 @@ export function inferDates(rows: DateRow[], machineOffset: (utcMs: number) => nu
       const saved = r.savedAt != null && fits(r.savedAt) ? r.savedAt : null;
       const editedFix = (): DateFix => {
         const off = zones(saved!, ZONE_WINDOW_LONG_S) ?? machineOffset(saved! * 1000);
-        return { id: r.id, local: saved! + off * 60, offset: off, source: "edited", detail: "when an editor saved the file" };
+        return {
+          id: r.id,
+          local: saved! + off * 60,
+          offset: off,
+          source: "edited",
+          detail: "when an editor saved the file",
+        };
       };
 
       if (seqFix?.tight) {
@@ -168,7 +178,13 @@ export function inferDates(rows: DateRow[], machineOffset: (utcMs: number) => nu
 
       // 3. The folder's year: the first moment of it, so it sorts at the end of that year.
       if (year != null) {
-        fixes.push({ id: r.id, local: Date.UTC(year, 0, 1) / 1000, offset: null, source: "folder", detail: `year from folder "${dir}"` });
+        fixes.push({
+          id: r.id,
+          local: Date.UTC(year, 0, 1) / 1000,
+          offset: null,
+          source: "folder",
+          detail: `year from folder "${dir}"`,
+        });
         continue;
       }
 
@@ -185,7 +201,12 @@ export function inferDates(rows: DateRow[], machineOffset: (utcMs: number) => nu
   return fixes;
 }
 
-function sequenceFix(r: DateRow, n: number, below?: { n: number; r: DateRow }, above?: { n: number; r: DateRow }): (DateFix & { tight: boolean }) | null {
+function sequenceFix(
+  r: DateRow,
+  n: number,
+  below?: { n: number; r: DateRow },
+  above?: { n: number; r: DateRow },
+): (DateFix & { tight: boolean }) | null {
   const name = (x: { r: DateRow }) => x.r.name;
   if (below && above) {
     const tb = below.r.t!;
@@ -194,15 +215,36 @@ function sequenceFix(r: DateRow, n: number, below?: { n: number; r: DateRow }, a
     if (ta < tb) return null;
     if (ta - tb <= SEQ_SAME_DAY_S) {
       const k = (n - below.n) / (above.n - below.n);
-      return { id: r.id, local: Math.round(tb + (ta - tb) * k), offset: below.r.offset, source: "sequence", detail: `between ${name(below)} and ${name(above)}`, tight: true };
+      return {
+        id: r.id,
+        local: Math.round(tb + (ta - tb) * k),
+        offset: below.r.offset,
+        source: "sequence",
+        detail: `between ${name(below)} and ${name(above)}`,
+        tight: true,
+      };
     }
     // Days apart: it most likely belongs with whichever neighbour is closer in the numbering.
     const near = n - below.n <= above.n - n ? below : above;
-    return { id: r.id, local: near.r.t!, offset: near.r.offset, source: "sequence", detail: `near ${name(near)} (between ${name(below)} and ${name(above)})`, tight: false };
+    return {
+      id: r.id,
+      local: near.r.t!,
+      offset: near.r.offset,
+      source: "sequence",
+      detail: `near ${name(near)} (between ${name(below)} and ${name(above)})`,
+      tight: false,
+    };
   }
   const only = below ?? above;
   if (only && Math.abs(only.n - n) <= SEQ_ONE_SIDE_MAX_STEP) {
-    return { id: r.id, local: only.r.t!, offset: only.r.offset, source: "sequence", detail: `near ${name(only)}`, tight: false };
+    return {
+      id: r.id,
+      local: only.r.t!,
+      offset: only.r.offset,
+      source: "sequence",
+      detail: `near ${name(only)}`,
+      tight: false,
+    };
   }
   return null;
 }
@@ -239,7 +281,13 @@ function zoneFixes(rows: DateRow[], zones: (utc: number) => number | null): Date
     const u = r.t - r.offset * 60;
     const off = zones(u);
     if (off == null || off === r.offset) continue;
-    out.push({ id: r.id, local: u + off * 60, offset: off, source: "filename-utc", detail: "zone of photos taken around then" });
+    out.push({
+      id: r.id,
+      local: u + off * 60,
+      offset: off,
+      source: "filename-utc",
+      detail: "zone of photos taken around then",
+    });
   }
   return out;
 }
@@ -260,9 +308,18 @@ function folderConflictFixes(rows: DateRow[], conflicted: Set<DateRow>, trusted:
   const fixes: DateFix[] = [];
   const toFolder = new Map<string, DateRow[]>();
   for (const r of conflicted) {
-    const twin = r.model && !isDerived(r.name) ? twins.get(`${shotStem(r.name)}|${r.model}`)?.find((x) => x.id !== r.id) : undefined;
+    const twin =
+      r.model && !isDerived(r.name)
+        ? twins.get(`${shotStem(r.name)}|${r.model}`)?.find((x) => x.id !== r.id)
+        : undefined;
     if (twin) {
-      fixes.push({ id: r.id, local: twin.t!, offset: twin.offset, source: "original", detail: `same shot as ${twin.name}` });
+      fixes.push({
+        id: r.id,
+        local: twin.t!,
+        offset: twin.offset,
+        source: "original",
+        detail: `same shot as ${twin.name}`,
+      });
     } else {
       (toFolder.get(r.dir) ?? toFolder.set(r.dir, []).get(r.dir)!).push(r);
     }
@@ -274,7 +331,13 @@ function folderConflictFixes(rows: DateRow[], conflicted: Set<DateRow>, trusted:
       // Year only. Keeping the camera's time of day on that first day keeps a burst in
       // shooting order, whatever else the folder holds.
       const local = start + (((r.t! % 86400) + 86400) % 86400);
-      fixes.push({ id: r.id, local, offset: null, source: "folder", detail: `camera date ${new Date(r.t! * 1000).getUTCFullYear()} contradicts folder "${dir}"` });
+      fixes.push({
+        id: r.id,
+        local,
+        offset: null,
+        source: "folder",
+        detail: `camera date ${new Date(r.t! * 1000).getUTCFullYear()} contradicts folder "${dir}"`,
+      });
     }
   }
   return fixes;

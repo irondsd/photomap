@@ -9,7 +9,10 @@ test("rejoins a path split on spaces", () => {
 });
 
 test("keeps separate valid paths separate", () => {
-  expect(joinSplitPaths(["/p/Other", "/p/My", "Photos/CameraRoll"], exists)).toEqual(["/p/Other", "/p/My Photos/CameraRoll"]);
+  expect(joinSplitPaths(["/p/Other", "/p/My", "Photos/CameraRoll"], exists)).toEqual([
+    "/p/Other",
+    "/p/My Photos/CameraRoll",
+  ]);
 });
 
 test("multiple spaces", () => {
