@@ -62,8 +62,22 @@ async function run(cmd: string[]): Promise<Buffer | null> {
 async function videoFrame(p: ThumbSource, px: number): Promise<Buffer | null> {
   const at = p.duration && p.duration > 2 ? Math.min(1, p.duration / 3) : 0;
   return run([
-    "ffmpeg", "-v", "error", "-ss", String(at), "-i", p.path,
-    "-frames:v", "1", "-vf", `scale='min(${px},iw)':-2`, "-f", "image2pipe", "-vcodec", "mjpeg", "-",
+    "ffmpeg",
+    "-v",
+    "error",
+    "-ss",
+    String(at),
+    "-i",
+    p.path,
+    "-frames:v",
+    "1",
+    "-vf",
+    `scale='min(${px},iw)':-2`,
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "mjpeg",
+    "-",
   ]);
 }
 
@@ -71,7 +85,10 @@ async function videoFrame(p: ThumbSource, px: number): Promise<Buffer | null> {
 async function sipsDecode(path: string, px: number, out: string): Promise<Buffer | null> {
   const tmp = `${out}.${process.pid}.${Math.random().toString(36).slice(2)}.sips.jpg`;
   try {
-    const proc = Bun.spawn(["sips", "-s", "format", "jpeg", "-Z", String(px), path, "--out", tmp], { stdout: "ignore", stderr: "ignore" });
+    const proc = Bun.spawn(["sips", "-s", "format", "jpeg", "-Z", String(px), path, "--out", tmp], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
     if ((await proc.exited) !== 0) return null;
     return Buffer.from(await Bun.file(tmp).arrayBuffer());
   } catch {
@@ -85,9 +102,11 @@ async function render(input: string | Buffer, size: ThumbSize): Promise<Buffer> 
   const { px, quality } = SPEC[size];
   let img = sharp(input, { failOn: "none", limitInputPixels: 0, animated: false }).rotate();
   img =
-    size === "s" ? img.resize(px, px, { fit: "cover", position: "attention" })
-    : size === "m" ? img.resize(px * 3, px, { fit: "inside", withoutEnlargement: true }) // panoramas up to 3:1
-    : img.resize(px, px, { fit: "inside", withoutEnlargement: true });
+    size === "s"
+      ? img.resize(px, px, { fit: "cover", position: "attention" })
+      : size === "m"
+        ? img.resize(px * 3, px, { fit: "inside", withoutEnlargement: true }) // panoramas up to 3:1
+        : img.resize(px, px, { fit: "inside", withoutEnlargement: true });
   return img.jpeg({ quality, mozjpeg: false }).toBuffer();
 }
 
@@ -132,13 +151,18 @@ const g = globalThis as { __pmPregenRunning?: boolean };
  * Fills the sidebar (s) and gallery (m) thumbnail caches for the whole library, newest
  * photos first. The server passes fewer workers so on-demand requests from the UI still get slots.
  */
-export async function pregenerateThumbs(onProgress?: (done: number, total: number) => void, workers = Math.max(2, CPUS)) {
+export async function pregenerateThumbs(
+  onProgress?: (done: number, total: number) => void,
+  workers = Math.max(2, CPUS),
+) {
   if (g.__pmPregenRunning) return;
   g.__pmPregenRunning = true;
   try {
     const jobs: [ThumbSource, ThumbSize][] = [];
     for (const r of db
-      .query<ThumbSource, []>(`SELECT id, path, mtime, kind, duration FROM photos WHERE missing = 0 ORDER BY taken_local DESC`)
+      .query<ThumbSource, []>(
+        `SELECT id, path, mtime, kind, duration FROM photos WHERE missing = 0 ORDER BY taken_local DESC`,
+      )
       .all()) {
       for (const size of ["s", "m"] as const) if (!existsSync(cacheFile(r, size))) jobs.push([r, size]);
     }

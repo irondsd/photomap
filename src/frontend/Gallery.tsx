@@ -91,7 +91,10 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
       // Browsers turn Shift + wheel into horizontal scrolling.
       const delta = (e.deltaY || e.deltaX) * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 600 : 1);
       // Pinches report small deltas; a mouse notch is ~100.
-      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomRef.current * Math.exp(-delta * (e.ctrlKey && !e.shiftKey ? 0.01 : 0.002))));
+      const z = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, zoomRef.current * Math.exp(-delta * (e.ctrlKey && !e.shiftKey ? 0.01 : 0.002))),
+      );
       if (z === zoomRef.current) return;
       zoomRef.current = z;
       if (!zoomAnchor.current) {
@@ -100,7 +103,8 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
         const y = l.y[k]!;
         const h = l.h[k]!;
         // Above the tile means a day header, which doesn't scale.
-        zoomAnchor.current = cy < y ? { k, f: 0, px: cy - y, clientY: e.clientY } : { k, f: (cy - y) / h, px: 0, clientY: e.clientY };
+        zoomAnchor.current =
+          cy < y ? { k, f: 0, px: cy - y, clientY: e.clientY } : { k, f: (cy - y) / h, px: 0, clientY: e.clientY };
       }
       cancelAnimationFrame(zoomFrame.current);
       zoomFrame.current = requestAnimationFrame(() => {
@@ -214,10 +218,19 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
 
   const resetSelected = async () => {
     const n = manualIds.length;
-    if (!confirm(`Undo the location you set on ${nf.format(n)} photo${n === 1 ? "" : "s"}?\n\nEach goes back to the location stored in its file, or to no location if the file has none.`)) return;
+    if (
+      !confirm(
+        `Undo the location you set on ${nf.format(n)} photo${n === 1 ? "" : "s"}?\n\nEach goes back to the location stored in its file, or to no location if the file has none.`,
+      )
+    )
+      return;
     setBusy(true);
     try {
-      const r = await fetch("/api/locations/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: manualIds }) });
+      const r = await fetch("/api/locations/reset", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: manualIds }),
+      });
       if (!r.ok) throw new Error((await r.json()).error ?? "Couldn't reset");
       clear();
       onLocationsChanged();
@@ -230,10 +243,19 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
 
   const resetSelectedDates = async () => {
     const n = manualDateIds.length;
-    if (!confirm(`Undo the date you set on ${nf.format(n)} photo${n === 1 ? "" : "s"}?\n\nEach goes back to the date stored in its file, or worked out from the files around it.`)) return;
+    if (
+      !confirm(
+        `Undo the date you set on ${nf.format(n)} photo${n === 1 ? "" : "s"}?\n\nEach goes back to the date stored in its file, or worked out from the files around it.`,
+      )
+    )
+      return;
     setBusy(true);
     try {
-      const r = await fetch("/api/dates/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: manualDateIds }) });
+      const r = await fetch("/api/dates/reset", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: manualDateIds }),
+      });
       if (!r.ok) throw new Error((await r.json()).error ?? "Couldn't reset");
       clear();
       onLocationsChanged();
@@ -256,8 +278,17 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
       let all = g.end > g.start;
       for (let j = g.start; j < g.end && all; j++) if (!selected.has(idAt(j))) all = false;
       items.push(
-        <div key={`g${g.start}`} className={`gheader ${all ? "is-selected" : ""}`} style={{ top: g.y, left: LEFT, width: contentW }}>
-          <button className="gcheck" aria-pressed={all} aria-label={`Select all photos from ${g.label}`} onClick={() => toggleGroup(gi)} />
+        <div
+          key={`g${g.start}`}
+          className={`gheader ${all ? "is-selected" : ""}`}
+          style={{ top: g.y, left: LEFT, width: contentW }}
+        >
+          <button
+            className="gcheck"
+            aria-pressed={all}
+            aria-label={`Select all photos from ${g.label}`}
+            onClick={() => toggleGroup(gi)}
+          />
           <span className="gheader-date">{g.label}</span>
           {g.places && <span className="gheader-places">{g.places}</span>}
         </div>,
@@ -275,7 +306,14 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
           style={{ left: layout.x[k], top: layout.y[k], width: layout.w[k], height: layout.h[k] }}
           onClick={(e) => onTileClick(k, e)}
         >
-          <img src={`/thumbs/m/${id}`} alt="" loading="lazy" decoding="async" draggable={false} onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />
+          <img
+            src={`/thumbs/m/${id}`}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onLoad={(e) => e.currentTarget.classList.add("is-loaded")}
+          />
           {points.kind[i] === 2 && <span className="gtile-video">▶</span>}
           <button
             className="gcheck"
@@ -302,7 +340,12 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
       </div>
 
       {layout && layout.height > box.h && (
-        <Scrubber layout={layout} height={box.h} scrollTop={scrollTop} onSeek={(y) => (scroller.current!.scrollTop = y)} />
+        <Scrubber
+          layout={layout}
+          height={box.h}
+          scrollTop={scrollTop}
+          onSeek={(y) => (scroller.current!.scrollTop = y)}
+        />
       )}
 
       {selecting && (
@@ -311,20 +354,40 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
             ✕
           </button>
           <span className="selection-count">{nf.format(visibleSelection.length)} selected</span>
-          <button className="btn btn-primary" disabled={!visibleSelection.length || busy} onClick={() => setBulkOpen(true)}>
+          <button
+            className="btn btn-primary"
+            disabled={!visibleSelection.length || busy}
+            onClick={() => setBulkOpen(true)}
+          >
             Set location…
           </button>
-          <button className="btn btn-primary" disabled={!visibleSelection.length || busy} onClick={() => setBulkDateOpen(true)}>
+          <button
+            className="btn btn-primary"
+            disabled={!visibleSelection.length || busy}
+            onClick={() => setBulkDateOpen(true)}
+          >
             Set date…
           </button>
           {manualIds.length > 0 && (
-            <button className="btn" disabled={busy} onClick={resetSelected} title="Go back to the locations stored in the files">
-              Reset {manualIds.length < visibleSelection.length ? nf.format(manualIds.length) : ""} location{manualIds.length === 1 ? "" : "s"}
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={resetSelected}
+              title="Go back to the locations stored in the files"
+            >
+              Reset {manualIds.length < visibleSelection.length ? nf.format(manualIds.length) : ""} location
+              {manualIds.length === 1 ? "" : "s"}
             </button>
           )}
           {manualDateIds.length > 0 && (
-            <button className="btn" disabled={busy} onClick={resetSelectedDates} title="Go back to the dates stored in the files">
-              Reset {manualDateIds.length < visibleSelection.length ? nf.format(manualDateIds.length) : ""} date{manualDateIds.length === 1 ? "" : "s"}
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={resetSelectedDates}
+              title="Go back to the dates stored in the files"
+            >
+              Reset {manualDateIds.length < visibleSelection.length ? nf.format(manualDateIds.length) : ""} date
+              {manualDateIds.length === 1 ? "" : "s"}
             </button>
           )}
         </div>
@@ -374,7 +437,17 @@ interface Mark {
 const SNAP_PX = 10;
 
 /** Google-Photos-style date rail: years labelled, months as dots, drag to jump. */
-function Scrubber({ layout, height, scrollTop, onSeek }: { layout: Layout; height: number; scrollTop: number; onSeek(y: number): void }) {
+function Scrubber({
+  layout,
+  height,
+  scrollTop,
+  onSeek,
+}: {
+  layout: Layout;
+  height: number;
+  scrollTop: number;
+  onSeek(y: number): void;
+}) {
   const rail = useRef<HTMLDivElement>(null);
   const [hoverY, setHoverY] = useState<number | null>(null);
   const dragging = useRef(false);
@@ -421,7 +494,8 @@ function Scrubber({ layout, height, scrollTop, onSeek }: { layout: Layout; heigh
   // On or next to a year label means "that year": snap to its first day.
   const target = (ty: number) => {
     let best: Mark | null = null;
-    for (const m of marks) if (m.label && Math.abs(m.y - ty) <= SNAP_PX && (!best || Math.abs(m.y - ty) < Math.abs(best.y - ty))) best = m;
+    for (const m of marks)
+      if (m.label && Math.abs(m.y - ty) <= SNAP_PX && (!best || Math.abs(m.y - ty) < Math.abs(best.y - ty))) best = m;
     return best ? best.cy : toContent(ty);
   };
   const seek = (ty: number) => onSeek(target(ty));

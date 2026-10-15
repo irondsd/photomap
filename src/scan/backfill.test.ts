@@ -6,7 +6,12 @@ const min = 60;
 const hour = 3600;
 const day = 86400;
 let nextId = 1;
-const at = (dt: number, lat: number | null = null, lon: number | null = null, offset: number | null = 0): BackfillPhoto => ({
+const at = (
+  dt: number,
+  lat: number | null = null,
+  lon: number | null = null,
+  offset: number | null = 0,
+): BackfillPhoto => ({
   id: nextId++,
   t: T0 + dt,
   offset,
@@ -22,7 +27,9 @@ describe("burst", () => {
     const a = at(0, PARIS.lat, PARIS.lon);
     const p = at(1 * min);
     const { proposals } = infer([a, p]);
-    expect(proposals).toEqual([{ id: p.id, lat: PARIS.lat, lon: PARIS.lon, rule: "burst", confidence: "high", from: [a.id], gapMin: 1 }]);
+    expect(proposals).toEqual([
+      { id: p.id, lat: PARIS.lat, lon: PARIS.lon, rule: "burst", confidence: "high", from: [a.id], gapMin: 1 },
+    ]);
   });
 
   test("interpolates between fixes on both sides", () => {

@@ -78,7 +78,9 @@ export function BulkDateDialog({ points, ids, indexOf, onClose, onDone }: BulkDa
         {(indices.length > 1 || overridden.length > 0) && (
           <p className="note">
             {indices.length > 1 && <>All of them get the same date. </>}
-            {overridden.length > 0 && <>{overridden.join(", ")} will be overridden. Reset brings back what the files say.</>}
+            {overridden.length > 0 && (
+              <>{overridden.join(", ")} will be overridden. Reset brings back what the files say.</>
+            )}
           </p>
         )}
         <DatePicker initial={null} onSave={save} onCancel={onClose} />

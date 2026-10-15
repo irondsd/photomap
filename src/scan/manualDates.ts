@@ -23,9 +23,12 @@ export function parseManualDate(date: unknown, time?: unknown): ManualDate | nul
 }
 
 /** The time zone comes from the photo's location, when it has one. */
-const placed = (d: ManualDate, lat: number | null, lon: number | null) => relocalize({ local: d.local, offset: null, source: d.source }, lat, lon);
+const placed = (d: ManualDate, lat: number | null, lon: number | null) =>
+  relocalize({ local: d.local, offset: null, source: d.source }, lat, lon);
 
-const locStmt = db.prepare<{ lat: number | null; lon: number | null }, [number]>(`SELECT lat, lon FROM photos WHERE id = ?`);
+const locStmt = db.prepare<{ lat: number | null; lon: number | null }, [number]>(
+  `SELECT lat, lon FROM photos WHERE id = ?`,
+);
 const setStmt = db.prepare(`UPDATE photos SET taken_local = ?, tz_offset = ?, time_source = ? WHERE id = ?`);
 
 /** Sets a date by hand. Returns false for an unknown photo. */
@@ -38,7 +41,10 @@ export function setManualDate(id: number, d: ManualDate): boolean {
 }
 
 /** Re-applies a hand-set date to freshly extracted metadata (rescan, location reset). */
-export function keepManualDate(meta: Extracted, prev: { taken_local: number | null; time_source: string | null }): Extracted {
+export function keepManualDate(
+  meta: Extracted,
+  prev: { taken_local: number | null; time_source: string | null },
+): Extracted {
   if (!isManualDate(prev.time_source) || prev.taken_local == null) return meta;
   const t = placed({ local: prev.taken_local, source: prev.time_source as ManualDate["source"] }, meta.lat, meta.lon);
   return { ...meta, taken_local: t.local, tz_offset: t.offset, time_source: t.source };

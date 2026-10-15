@@ -64,7 +64,14 @@ export function DatePicker({ initial, hint, onSave, onCancel }: DatePickerProps)
           required
           autoFocus
         />
-        <input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} onKeyDown={onKeyDown} aria-label="Time (optional)" />
+        <input
+          className="input"
+          type="time"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+          onKeyDown={onKeyDown}
+          aria-label="Time (optional)"
+        />
         {time && (
           <button className="btn btn-small btn-ghost" onClick={() => setTime("")} title="Only the day is known">
             No time
@@ -72,7 +79,9 @@ export function DatePicker({ initial, hint, onSave, onCancel }: DatePickerProps)
         )}
       </div>
       <div className="dim small">
-        {time ? "Date and time as shown on a clock where the photo was taken." : "The time is optional: leave it empty if you only know the day."}
+        {time
+          ? "Date and time as shown on a clock where the photo was taken."
+          : "The time is optional: leave it empty if you only know the day."}
         {hint && <> {hint}</>}
       </div>
       {error && <div className="error">{error}</div>}

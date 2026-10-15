@@ -1,0 +1,5 @@
+# Formatting-only commits, skipped by `git blame`.
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format the codebase with bun fmt
+43924dc66f61d05a6757dd1cd17285f7f370cd1b

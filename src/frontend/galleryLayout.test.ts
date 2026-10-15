@@ -29,16 +29,30 @@ describe("buildLayout", () => {
   const target = rowHeightFor(W);
 
   test("groups by day, newest first, undated last", () => {
-    const p = points([[10 * DAY + 100, 1], [12 * DAY + 50, 1], [12 * DAY + 900, 1], [NaN, 1]]);
+    const p = points([
+      [10 * DAY + 100, 1],
+      [12 * DAY + 50, 1],
+      [12 * DAY + 900, 1],
+      [NaN, 1],
+    ]);
     const l = buildLayout(p, galleryOrder(p, 7), W);
-    expect(l.groups.map((g) => [g.end - g.start, g.label === "Date unknown"])).toEqual([[2, false], [1, false], [1, true]]);
+    expect(l.groups.map((g) => [g.end - g.start, g.label === "Date unknown"])).toEqual([
+      [2, false],
+      [1, false],
+      [1, true],
+    ]);
     // Newest photo of the newest day comes first.
     expect(p.t[l.order[0]!]).toBe(12 * DAY + 900);
   });
 
   test("year-only photos get their own group; dates that are only the file time go last", () => {
     const jan1 = Date.UTC(2012, 0, 1) / 1000;
-    const p = points([[jan1 + 9 * 3600, 1], [jan1, 1], [jan1 + 1, 1], [Date.UTC(2026, 9, 12) / 1000, 1]]);
+    const p = points([
+      [jan1 + 9 * 3600, 1],
+      [jan1, 1],
+      [jan1 + 1, 1],
+      [Date.UTC(2026, 9, 12) / 1000, 1],
+    ]);
     // Index order is by time: [jan1 (year-only), jan1+1 (year-only), jan1+9h (real), 2026 (file time)].
     p.precision.set([2, 2, 0, 3]);
     const l = buildLayout(p, galleryOrder(p, 7), W);
@@ -78,14 +92,21 @@ describe("buildLayout", () => {
   });
 
   test("headers sit above their photos and list the main countries", () => {
-    const p = points([[5 * DAY, 1, 1], [5 * DAY + 1, 1, 1], [5 * DAY + 2, 1, 2]]);
+    const p = points([
+      [5 * DAY, 1, 1],
+      [5 * DAY + 1, 1, 1],
+      [5 * DAY + 2, 1, 2],
+    ]);
     const l = buildLayout(p, galleryOrder(p, 7), W);
     expect(l.groups[0]!.places).toBe("Russia · Georgia");
     expect(l.y[0]).toBe(l.groups[0]!.y + HEADER_H);
   });
 
   test("filters by media type", () => {
-    const p = points([[5 * DAY, 1], [5 * DAY + 1, 1]]);
+    const p = points([
+      [5 * DAY, 1],
+      [5 * DAY + 1, 1],
+    ]);
     p.kind[1] = 2; // video
     expect(galleryOrder(p, 1).length).toBe(1);
     expect(galleryOrder(p, 4).length).toBe(1);

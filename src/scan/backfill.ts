@@ -58,7 +58,9 @@ const NEARBY_M = 5000;
 
 export function distanceM(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const r = Math.PI / 180;
-  const x = Math.sin(((bLat - aLat) * r) / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(((bLon - aLon) * r) / 2) ** 2;
+  const x =
+    Math.sin(((bLat - aLat) * r) / 2) ** 2 +
+    Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(((bLon - aLon) * r) / 2) ** 2;
   return 2 * 6371e3 * Math.asin(Math.sqrt(x));
 }
 
@@ -75,7 +77,10 @@ interface Fix {
  * it was in use. Nearby grid cells are merged so one address doesn't split in two.
  */
 export function detectHomes(fixes: { t: number; lat: number; lon: number }[]): Home[] {
-  const cells = new Map<string, { days: Set<number>; n: number; lat: number; lon: number; first: number; last: number }>();
+  const cells = new Map<
+    string,
+    { days: Set<number>; n: number; lat: number; lon: number; first: number; last: number }
+  >();
   for (const f of fixes) {
     // ~150 m cells
     const key = `${Math.round(f.lat * 700)}:${Math.round(f.lon * 700 * Math.cos((f.lat * Math.PI) / 180))}`;
@@ -102,9 +107,7 @@ export function detectHomes(fixes: { t: number; lat: number; lon: number }[]): H
       homes.push({ lat: c.lat, lon: c.lon, days: 0, first: c.first, last: c.last, daySet: new Set(c.days) });
     }
   }
-  return homes
-    .map(({ daySet, ...h }) => ({ ...h, days: daySet.size }))
-    .filter((h) => h.days >= HOME_MIN_DAYS);
+  return homes.map(({ daySet, ...h }) => ({ ...h, days: daySet.size })).filter((h) => h.days >= HOME_MIN_DAYS);
 }
 
 export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped: Skipped[]; homes: Home[] } {
@@ -127,12 +130,16 @@ export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped
 
   const fixes: Fix[] = photos
     // A location without a trustworthy time can't place anything else.
-    .filter((p): p is BackfillPhoto & { lat: number; lon: number } => p.lat != null && p.lon != null && Number.isFinite(p.t))
+    .filter(
+      (p): p is BackfillPhoto & { lat: number; lon: number } => p.lat != null && p.lon != null && Number.isFinite(p.t),
+    )
     .map((p) => ({ id: p.id, u: utc(p), t: p.t, lat: p.lat, lon: p.lon }))
     .sort((a, b) => a.u - b.u);
   const homes = detectHomes(fixes);
   const homeAt = (lat: number, lon: number, t: number) =>
-    homes.some((h) => distanceM(h.lat, h.lon, lat, lon) <= STAY_M && t >= h.first - 30 * 86400 && t <= h.last + 30 * 86400);
+    homes.some(
+      (h) => distanceM(h.lat, h.lon, lat, lon) <= STAY_M && t >= h.first - 30 * 86400 && t <= h.last + 30 * 86400,
+    );
 
   const proposals: Proposal[] = [];
   const skipped: Skipped[] = [];
@@ -206,11 +213,27 @@ export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped
       if (spanH <= STAY_MAX_H) {
         // Over longer spans, "same spot before and after" often means you went out and came
         // back (hold-out test: under a third within 1 km), so those are only a guess.
-        proposals.push({ id: p.id, lat, lon, rule: "stay", confidence: spanH <= STAY_SURE_H ? "high" : "low", from: [prev.id, next.id], gapMin: Math.max(gp, gn) });
+        proposals.push({
+          id: p.id,
+          lat,
+          lon,
+          rule: "stay",
+          confidence: spanH <= STAY_SURE_H ? "high" : "low",
+          from: [prev.id, next.id],
+          gapMin: Math.max(gp, gn),
+        });
         continue;
       }
       if (spanH <= HOME_MAX_DAYS * 24 && homeAt(lat, lon, p.t)) {
-        proposals.push({ id: p.id, lat, lon, rule: "home", confidence: "low", from: [prev.id, next.id], gapMin: Math.max(gp, gn) });
+        proposals.push({
+          id: p.id,
+          lat,
+          lon,
+          rule: "home",
+          confidence: "low",
+          from: [prev.id, next.id],
+          gapMin: Math.max(gp, gn),
+        });
         continue;
       }
       skipped.push({ id: p.id, reason: "neighbours-far-in-time", gapMin: Math.max(gp, gn), spreadM: spread });
@@ -220,7 +243,15 @@ export function infer(photos: BackfillPhoto[]): { proposals: Proposal[]; skipped
     // 4. Moving around one area: a fix within the hour, before and after no more than a few km apart.
     if (Math.min(gp, gn) <= NEARBY_MIN && (spread == null || spread <= NEARBY_M)) {
       const near = gp <= gn ? prev! : next!;
-      proposals.push({ id: p.id, lat: near.lat, lon: near.lon, rule: "nearby", confidence: "low", from: [near.id], gapMin: Math.min(gp, gn) });
+      proposals.push({
+        id: p.id,
+        lat: near.lat,
+        lon: near.lon,
+        rule: "nearby",
+        confidence: "low",
+        from: [near.id],
+        gapMin: Math.min(gp, gn),
+      });
       continue;
     }
 

@@ -28,13 +28,23 @@ beforeAll(async () => {
   const root = join(dir, "library");
   mkdirSync(join(root, "2020"), { recursive: true });
   const path = join(root, "2020", "IMG_0001.jpg");
-  await sharp({ create: { width: 8, height: 6, channels: 3, background: "#888" } }).jpeg().toFile(path);
+  await sharp({ create: { width: 8, height: 6, channels: 3, background: "#888" } })
+    .jpeg()
+    .toFile(path);
   const r = addRoot(root);
   rootId = r.id;
   const st = Bun.file(path);
   const mtime = st.lastModified;
   upsertPhoto({
-    root_id: r.id, path, rel_dir: "2020", name: "IMG_0001.jpg", ext: "jpg", kind: "photo", size: st.size, mtime, scan_gen: 1,
+    root_id: r.id,
+    path,
+    rel_dir: "2020",
+    name: "IMG_0001.jpg",
+    ext: "jpg",
+    kind: "photo",
+    size: st.size,
+    mtime,
+    scan_gen: 1,
     ...(await extract(path, "photo", "IMG_0001.jpg", mtime)),
   });
   photoId = db.query<{ id: number }, [string]>(`SELECT id FROM photos WHERE path = ?`).get(path)!.id;
@@ -70,7 +80,14 @@ test("a hand-set wall time keeps its value and takes the zone of the location", 
 
 test("inference never replaces a hand-set date, nor learns from one", () => {
   const row = (id: number, name: string, t: number | null, source: string | null): DateRow => ({
-    id, dir: "/photos/2020", name, t, offset: null, source, lat: null, mtimeMs: 0,
+    id,
+    dir: "/photos/2020",
+    name,
+    t,
+    offset: null,
+    source,
+    lat: null,
+    mtimeMs: 0,
   });
   const fixes = inferDates(
     [
@@ -114,7 +131,12 @@ test("a location sets the zone of a hand-set date, and resetting the location ke
 
   await restoreFromFile(photoId);
   p = getPhoto(photoId)!;
-  expect([p.lat, p.taken_local, p.tz_offset, p.time_source]).toEqual([null, utc("2020-07-14T18:45:00"), null, "manual"]);
+  expect([p.lat, p.taken_local, p.tz_offset, p.time_source]).toEqual([
+    null,
+    utc("2020-07-14T18:45:00"),
+    null,
+    "manual",
+  ]);
 });
 
 test("resetting goes back to the date from the folder", async () => {

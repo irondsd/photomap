@@ -88,7 +88,10 @@ function altitude(e: Record<string, unknown>): number | null {
   return below ? -alt : alt;
 }
 
-function finish(base: Omit<Extracted, "taken_local" | "tz_offset" | "time_source" | "country_code" | "country">, time: TimeInput): Extracted {
+function finish(
+  base: Omit<Extracted, "taken_local" | "tz_offset" | "time_source" | "country_code" | "country">,
+  time: TimeInput,
+): Extracted {
   const t = resolveTime({ ...time, lat: base.lat, lon: base.lon });
   const c = base.lat != null && base.lon != null ? countryAt(base.lat, base.lon) : { code: null, name: null };
   return {
@@ -102,9 +105,21 @@ function finish(base: Omit<Extracted, "taken_local" | "tz_offset" | "time_source
 }
 
 const EMPTY = {
-  lat: null, lon: null, alt: null, gps_source: null,
-  width: null, height: null, orientation: null, duration: null,
-  make: null, model: null, lens: null, iso: null, fnumber: null, exposure: null, focal: null,
+  lat: null,
+  lon: null,
+  alt: null,
+  gps_source: null,
+  width: null,
+  height: null,
+  orientation: null,
+  duration: null,
+  make: null,
+  model: null,
+  lens: null,
+  iso: null,
+  fnumber: null,
+  exposure: null,
+  focal: null,
   error: null,
 } satisfies Partial<Extracted>;
 
@@ -119,8 +134,15 @@ const hasCameraDate = (e: Record<string, unknown> | undefined) =>
 async function xmpDates(path: string): Promise<Record<string, unknown> | undefined> {
   try {
     const x = await exifr.parse(path, {
-      tiff: false, exif: false, gps: false, ifd1: false, interop: false,
-      xmp: true, iptc: true, mergeOutput: true, reviveValues: false,
+      tiff: false,
+      exif: false,
+      gps: false,
+      ifd1: false,
+      interop: false,
+      xmp: true,
+      iptc: true,
+      mergeOutput: true,
+      reviveValues: false,
     });
     const DateTimeOriginal = x?.DateTimeOriginal ?? x?.DateCreated;
     const CreateDate = x?.CreateDate;
@@ -191,13 +213,21 @@ async function extractVideo(path: string, name: string, mtimeMs: number): Promis
     await proc.exited;
     const j = JSON.parse(out || "{}") as {
       format?: { duration?: string; tags?: Record<string, string> };
-      streams?: { codec_type?: string; width?: number; height?: number; tags?: Record<string, string>; side_data_list?: { rotation?: number }[] }[];
+      streams?: {
+        codec_type?: string;
+        width?: number;
+        height?: number;
+        tags?: Record<string, string>;
+        side_data_list?: { rotation?: number }[];
+      }[];
     };
     const tags: Record<string, string> = {};
     for (const [k, v] of Object.entries(j.format?.tags ?? {})) tags[k.toLowerCase()] = v;
     const vs = j.streams?.find((s) => s.codec_type === "video");
     const loc = parseIso6709(tags["com.apple.quicktime.location.iso6709"] ?? tags["location"] ?? tags["location-eng"]);
-    const rotation = Math.abs(vs?.side_data_list?.find((d) => d.rotation != null)?.rotation ?? Number(vs?.tags?.rotate ?? 0));
+    const rotation = Math.abs(
+      vs?.side_data_list?.find((d) => d.rotation != null)?.rotation ?? Number(vs?.tags?.rotate ?? 0),
+    );
     const rotated = rotation === 90 || rotation === 270;
     return finish(
       {
@@ -242,7 +272,10 @@ const UUID_EPOCH_OFFSET = 122192928000000000n; // 100 ns ticks from 1582-10-15 t
  * record when a file was saved. Returns UTC seconds, or null for other UUID kinds.
  */
 export function uuidV1Seconds(id: string): number | null {
-  const hex = id.slice(id.lastIndexOf(":") + 1).replace(/-/g, "").toLowerCase();
+  const hex = id
+    .slice(id.lastIndexOf(":") + 1)
+    .replace(/-/g, "")
+    .toLowerCase();
   if (!/^[0-9a-f]{32}$/.test(hex) || hex[12] !== "1") return null;
   if (id.toLowerCase().includes(ADOBE_PLACEHOLDER_ID)) return null;
   const ticks = BigInt("0x" + hex.slice(13, 16) + hex.slice(8, 12) + hex.slice(0, 8));
@@ -257,7 +290,15 @@ export function uuidV1Seconds(id: string): number | null {
 export async function editedAt(path: string): Promise<number | null> {
   let x: Record<string, unknown> | undefined;
   try {
-    x = await exifr.parse(path, { tiff: false, exif: false, gps: false, ifd1: false, xmp: true, mergeOutput: true, reviveValues: false });
+    x = await exifr.parse(path, {
+      tiff: false,
+      exif: false,
+      gps: false,
+      ifd1: false,
+      xmp: true,
+      mergeOutput: true,
+      reviveValues: false,
+    });
   } catch {
     return null;
   }
@@ -265,7 +306,8 @@ export async function editedAt(path: string): Promise<number | null> {
   const times: number[] = [];
   const ids: unknown[] = [x.InstanceID, x.DocumentID, x.OriginalDocumentID];
   const derived = x.DerivedFrom as Record<string, unknown> | undefined;
-  if (derived && typeof derived === "object") ids.push(derived.instanceID, derived.documentID, derived.originalDocumentID);
+  if (derived && typeof derived === "object")
+    ids.push(derived.instanceID, derived.documentID, derived.originalDocumentID);
   for (const id of ids) {
     const t = typeof id === "string" ? uuidV1Seconds(id) : null;
     if (t != null) times.push(t);

@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  APPROX, addUnit, floorTo, lowerBound, nf, formatDate, formatDayShort, formatHour, formatMonth, formatMonthShort,
-  formatRange, formatYear, type Points, type Range, type Unit,
+  APPROX,
+  addUnit,
+  floorTo,
+  lowerBound,
+  nf,
+  formatDate,
+  formatDayShort,
+  formatHour,
+  formatMonth,
+  formatMonthShort,
+  formatRange,
+  formatYear,
+  type Points,
+  type Range,
+  type Unit,
 } from "./data";
 
 interface TimelineProps {
@@ -27,11 +40,32 @@ const MIN_SPAN = 6 * 3600;
 const EDGE_PX = 6;
 
 const BIN_UNITS: [Unit, number][] = [
-  ["hour", 1], ["hour", 3], ["hour", 6], ["day", 1], ["week", 1], ["month", 1], ["month", 3], ["year", 1],
+  ["hour", 1],
+  ["hour", 3],
+  ["hour", 6],
+  ["day", 1],
+  ["week", 1],
+  ["month", 1],
+  ["month", 3],
+  ["year", 1],
 ];
 const TICK_UNITS: [Unit, number][] = [
-  ["hour", 1], ["hour", 3], ["hour", 6], ["hour", 12], ["day", 1], ["day", 2], ["week", 1],
-  ["month", 1], ["month", 3], ["month", 6], ["year", 1], ["year", 2], ["year", 5], ["year", 10], ["year", 25], ["year", 50],
+  ["hour", 1],
+  ["hour", 3],
+  ["hour", 6],
+  ["hour", 12],
+  ["day", 1],
+  ["day", 2],
+  ["week", 1],
+  ["month", 1],
+  ["month", 3],
+  ["month", 6],
+  ["year", 1],
+  ["year", 2],
+  ["year", 5],
+  ["year", 10],
+  ["year", 25],
+  ["year", 50],
 ];
 
 function pickUnit(span: number, width: number, units: [Unit, number][], minPx: number): [Unit, number] {
@@ -169,7 +203,7 @@ export function Timeline(props: TimelineProps) {
 
   const clampView = useCallback(
     (v: Range): Range => {
-      let s = Math.min(Math.max(v[1] - v[0], MIN_SPAN), maxSpan);
+      const s = Math.min(Math.max(v[1] - v[0], MIN_SPAN), maxSpan);
       let a = v[0] + (v[1] - v[0] - s) / 2;
       const lo = extent[0] - s * 0.5;
       const hi = extent[1] + s * 0.5;
@@ -359,7 +393,8 @@ export function Timeline(props: TimelineProps) {
     const d = drag.current;
     const el = canvas.current!;
     if (!d) {
-      const nearEdge = selection && (Math.abs(x - xOf(selection[0])) < EDGE_PX || Math.abs(x - xOf(selection[1])) < EDGE_PX);
+      const nearEdge =
+        selection && (Math.abs(x - xOf(selection[0])) < EDGE_PX || Math.abs(x - xOf(selection[1])) < EDGE_PX);
       const inside = selection && x > xOf(selection[0]) && x < xOf(selection[1]);
       el.style.cursor = y > size.h - AXIS_H ? "grab" : nearEdge ? "ew-resize" : inside ? "move" : "crosshair";
       return;
@@ -481,7 +516,10 @@ export function Timeline(props: TimelineProps) {
           {shown ? (
             <>
               <strong>{formatRange(shown)}</strong>
-              <span className="dim"> · {nf.format(selCount ?? 0)} {props.followMap ? "in map area" : "photos"}</span>
+              <span className="dim">
+                {" "}
+                · {nf.format(selCount ?? 0)} {props.followMap ? "in map area" : "photos"}
+              </span>
             </>
           ) : (
             <span className="dim">Drag to select a time range · scroll to zoom · drag the axis to pan</span>
@@ -493,7 +531,15 @@ export function Timeline(props: TimelineProps) {
             Map area only
           </label>
           {selection && (
-            <button className="btn btn-ghost" onClick={() => animateTo([selection[0] - (selection[1] - selection[0]) * 0.1, selection[1] + (selection[1] - selection[0]) * 0.1])}>
+            <button
+              className="btn btn-ghost"
+              onClick={() =>
+                animateTo([
+                  selection[0] - (selection[1] - selection[0]) * 0.1,
+                  selection[1] + (selection[1] - selection[0]) * 0.1,
+                ])
+              }
+            >
               Zoom to selection
             </button>
           )}

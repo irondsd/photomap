@@ -3,8 +3,12 @@ import { uuidV1Seconds, parseIso6709 } from "./extract";
 
 test("Photoshop instance IDs decode to their save time", () => {
   // From a real export: saved 6 Aug 2012, 09:53:08 UTC.
-  expect(new Date(uuidV1Seconds("xmp.iid:8683A3D3DFAC11E1922ED22E09E88736")! * 1000).toISOString()).toBe("2012-08-06T09:53:08.000Z");
-  expect(uuidV1Seconds("uuid:8683a3d3-dfac-11e1-922e-d22e09e88736")).toBe(uuidV1Seconds("xmp.iid:8683A3D3DFAC11E1922ED22E09E88736"));
+  expect(new Date(uuidV1Seconds("xmp.iid:8683A3D3DFAC11E1922ED22E09E88736")! * 1000).toISOString()).toBe(
+    "2012-08-06T09:53:08.000Z",
+  );
+  expect(uuidV1Seconds("uuid:8683a3d3-dfac-11e1-922e-d22e09e88736")).toBe(
+    uuidV1Seconds("xmp.iid:8683A3D3DFAC11E1922ED22E09E88736"),
+  );
 });
 
 test("random (v4) IDs and Adobe's placeholder ID say nothing", () => {

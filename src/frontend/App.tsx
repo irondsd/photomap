@@ -57,7 +57,11 @@ function passes(p: Points, i: number, range: Range | null, kinds: number) {
 
 /** Bounds of geotagged photos passing the filter, or null. */
 function boundsOf(p: Points, range: Range | null, kinds: number): LngLatBoundsLike | null {
-  let w = 180, s = 90, e = -180, n = -90, found = 0;
+  let w = 180,
+    s = 90,
+    e = -180,
+    n = -90,
+    found = 0;
   const lo = range ? lowerBound(p.t, p.dated, range[0]) : 0;
   const hi = range ? lowerBound(p.t, p.dated, range[1]) : p.n;
   for (let i = lo; i < hi; i++) {
@@ -72,7 +76,10 @@ function boundsOf(p: Points, range: Range | null, kinds: number): LngLatBoundsLi
   }
   if (!found) return null;
   const pad = 0.002;
-  return [[w - pad, s - pad], [e + pad, n + pad]];
+  return [
+    [w - pad, s - pad],
+    [e + pad, n + pad],
+  ];
 }
 
 function usePrefersDark() {
@@ -110,7 +117,9 @@ export function App() {
     else setMapMounted(true);
     try {
       localStorage.setItem("pm.view", m);
-    } catch {}
+    } catch {
+      // Storage can be unavailable (private mode, blocked); the view just won't be remembered.
+    }
   }, []);
   const [points, setPoints] = useState<Points | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -184,10 +193,12 @@ export function App() {
     if (!points) return;
     clientRef.current!.load(points);
     clientRef.current!.filter(selection, kinds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the effect below re-filters on selection/kind changes.
   }, [points]);
 
   useEffect(() => {
     if (points) clientRef.current!.filter(selection, kinds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- new points are loaded and filtered above.
   }, [selection, kinds]);
 
   const onView = useCallback((bbox: BBox, zoom: number) => {
@@ -203,7 +214,9 @@ export function App() {
       if (Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds)) out.push(i);
     }
     // Undated photos sit at the end of the index; show them last.
-    return Int32Array.from(out.sort((a, b) => (Number.isNaN(points.t[a]!) ? 1 : 0) - (Number.isNaN(points.t[b]!) ? 1 : 0)));
+    return Int32Array.from(
+      out.sort((a, b) => (Number.isNaN(points.t[a]!) ? 1 : 0) - (Number.isNaN(points.t[b]!) ? 1 : 0)),
+    );
   }, [points, selection, kinds]);
 
   const mapMask = useMemo(() => {
@@ -227,7 +240,7 @@ export function App() {
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  }, [setMode]);
 
   useEffect(() => {
     const id = setTimeout(() => writeHash(mode, mapRef.current, selection), 300);
@@ -292,7 +305,7 @@ export function App() {
       setHover(i);
       setTimeout(() => setHover((h) => (h === i ? null : h)), 3500);
     },
-    [points],
+    [points, setMode],
   );
 
   useEffect(() => {
@@ -309,7 +322,11 @@ export function App() {
   useEffect(() => {
     if (isEmpty && mode === "gallery") setMode("map");
   }, [isEmpty, mode, setMode]);
-  const initialBounds = useMemo(() => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null), [points !== null]);
+  const initialBounds = useMemo(
+    () => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first load positions the map.
+    [points !== null],
+  );
 
   return (
     <div className="app">
@@ -337,7 +354,9 @@ export function App() {
           {scan?.running && (
             <button className="pill" onClick={() => setLibraryOpen(true)}>
               <span className="spinner" aria-hidden />
-              {scan.phase === "walking" ? "Scanning…" : `Indexing ${Math.round((scan.processed / Math.max(1, scan.found)) * 100)}%`}
+              {scan.phase === "walking"
+                ? "Scanning…"
+                : `Indexing ${Math.round((scan.processed / Math.max(1, scan.found)) * 100)}%`}
             </button>
           )}
           {stats && stats.total > 0 && (
@@ -370,7 +389,11 @@ export function App() {
                 />
               )}
               {points && result.total > 0 && (
-                <button className="btn btn-float fit-btn" onClick={fitToPhotos} title="Zoom the map to the photos in the current selection">
+                <button
+                  className="btn btn-float fit-btn"
+                  onClick={fitToPhotos}
+                  title="Zoom the map to the photos in the current selection"
+                >
                   Fit to photos
                 </button>
               )}
@@ -379,8 +402,8 @@ export function App() {
                   <div className="welcome-card">
                     <h1>Your photos, on a map</h1>
                     <p className="dim">
-                      Point Photomap at a folder. It reads every photo and video inside it, including subfolders, and places them by their GPS
-                      data. Nothing leaves your computer and your files are never modified.
+                      Point Photomap at a folder. It reads every photo and video inside it, including subfolders, and
+                      places them by their GPS data. Nothing leaves your computer and your files are never modified.
                     </p>
                     {scan?.running ? <ScanProgress scan={scan} /> : <AddFolder autoFocus onAdded={() => pollScan()} />}
                   </div>

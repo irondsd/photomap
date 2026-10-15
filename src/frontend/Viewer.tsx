@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatBytes, formatDate, formatDateTime, formatExposure, formatOffset, formatYear, localStorageGet, localStorageSet, nearestTagged, nf, type Points } from "./data";
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatExposure,
+  formatOffset,
+  formatYear,
+  localStorageGet,
+  localStorageSet,
+  nearestTagged,
+  nf,
+  type Points,
+} from "./data";
 import { DatePicker, toDateInput, type DateInput } from "./DatePicker";
 import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
@@ -77,7 +89,8 @@ function formatTaken(t: number, source: string | null): string {
 
 /** What the date fields start with: as much as is known, nothing for a guess from the file's modified time. */
 function dateInputOf(d: PhotoDetail): DateInput | null {
-  if (d.taken_local == null || d.time_source == null || d.time_source === "mtime" || d.time_source === "folder") return null;
+  if (d.taken_local == null || d.time_source == null || d.time_source === "mtime" || d.time_source === "folder")
+    return null;
   return toDateInput(d.taken_local, !DAY_ONLY.has(d.time_source));
 }
 
@@ -135,6 +148,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
       if (j != null && points.kind[j] !== 2) new Image().src = `/thumbs/l/${nid}`;
     }
     return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per photo, not when the list around it changes.
   }, [id]);
 
   useEffect(() => {
@@ -167,7 +181,9 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     onLocationChange();
   };
   const resetLocation = () => {
-    const ok = confirm("Undo the location you set?\n\nThe photo goes back to the location stored in its file, or to no location if the file has none.");
+    const ok = confirm(
+      "Undo the location you set?\n\nThe photo goes back to the location stored in its file, or to no location if the file has none.",
+    );
     if (ok) saveLocation(null).catch((err) => alert(err.message));
   };
   const saveDate = async (v: DateInput | null) => {
@@ -177,19 +193,42 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     onLocationChange();
   };
   const resetDate = () => {
-    const ok = confirm("Undo the date you set?\n\nThe photo goes back to the date stored in its file, or worked out from the files around it.");
+    const ok = confirm(
+      "Undo the date you set?\n\nThe photo goes back to the date stored in its file, or worked out from the files around it.",
+    );
     if (ok) saveDate(null).catch((err) => alert(err.message));
   };
-  const settings = d && [d.fnumber && `ƒ/${+d.fnumber.toFixed(1)}`, formatExposure(d.exposure), d.iso && `ISO ${d.iso}`, d.focal && `${+d.focal.toFixed(1)} mm`].filter(Boolean);
+  const settings =
+    d &&
+    [
+      d.fnumber && `ƒ/${+d.fnumber.toFixed(1)}`,
+      formatExposure(d.exposure),
+      d.iso && `ISO ${d.iso}`,
+      d.focal && `${+d.focal.toFixed(1)} mm`,
+    ].filter(Boolean);
 
   return (
     <div className="viewer" role="dialog" aria-modal="true">
       <div className="viewer-stage" onClick={(e) => e.target === e.currentTarget && onClose()}>
         {isVideo ? (
-          <video key={id} src={`/original/${id}`} poster={`/thumbs/l/${id}`} controls autoPlay playsInline className="viewer-media" />
+          <video
+            key={id}
+            src={`/original/${id}`}
+            poster={`/thumbs/l/${id}`}
+            controls
+            autoPlay
+            playsInline
+            className="viewer-media"
+          />
         ) : (
           <>
-            <img key={`s${id}`} src={`/thumbs/s/${id}`} alt="" className="viewer-media viewer-placeholder" aria-hidden />
+            <img
+              key={`s${id}`}
+              src={`/thumbs/s/${id}`}
+              alt=""
+              className="viewer-media viewer-placeholder"
+              aria-hidden
+            />
             <img
               key={`l${id}`}
               src={`/thumbs/l/${id}`}
@@ -235,7 +274,11 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                   <h4>{dateInputOf(d) ? "Change date" : "Add date"}</h4>
                   <DatePicker
                     initial={dateInputOf(d)}
-                    hint={d.time_source === "folder" && d.taken_local != null ? `The folder name says ${formatYear(d.taken_local)}.` : null}
+                    hint={
+                      d.time_source === "folder" && d.taken_local != null
+                        ? `The folder name says ${formatYear(d.taken_local)}.`
+                        : null
+                    }
                     onSave={saveDate}
                     onCancel={() => setEditingDate(false)}
                   />
@@ -246,14 +289,20 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                   <div className="dim">
                     {formatOffset(d.tz_offset)}
                     {d.time_source && MANUAL_DATE.has(d.time_source) && <div className="small">Set by you</div>}
-                    {d.time_source && TIME_SOURCE_NOTE[d.time_source] && <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>}
+                    {d.time_source && TIME_SOURCE_NOTE[d.time_source] && (
+                      <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>
+                    )}
                   </div>
                   <div className="row">
                     <button className="btn btn-small" onClick={() => setEditingDate(true)}>
                       {dateInputOf(d) ? "Change date" : "Add date"}
                     </button>
                     {d.time_source && MANUAL_DATE.has(d.time_source) && (
-                      <button className="btn btn-small" onClick={resetDate} title="Go back to the date stored in the file">
+                      <button
+                        className="btn btn-small"
+                        onClick={resetDate}
+                        title="Go back to the date stored in the file"
+                      >
                         Reset
                       </button>
                     )}
@@ -277,7 +326,9 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                   <MiniMap lat={d.lat} lon={d.lon} />
                   <div>{d.country ?? "Unknown country"}</div>
                   {d.gps_source === "manual" && <div className="dim small">Set by you</div>}
-                  {d.gps_source && GPS_SOURCE_NOTE[d.gps_source] && <div className="note">{GPS_SOURCE_NOTE[d.gps_source]}</div>}
+                  {d.gps_source && GPS_SOURCE_NOTE[d.gps_source] && (
+                    <div className="note">{GPS_SOURCE_NOTE[d.gps_source]}</div>
+                  )}
                   <div className="dim mono">
                     {d.lat.toFixed(5)}, {d.lon.toFixed(5)}
                     {d.alt != null && ` · ${Math.round(d.alt)} m`}
@@ -300,7 +351,11 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                       Change
                     </button>
                     {d.gps_source === "manual" && (
-                      <button className="btn btn-small" onClick={resetLocation} title="Go back to the location stored in the file">
+                      <button
+                        className="btn btn-small"
+                        onClick={resetLocation}
+                        title="Go back to the location stored in the file"
+                      >
                         Reset
                       </button>
                     )}
@@ -329,7 +384,13 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                 <h4>File</h4>
                 <div className="break">{d.name}</div>
                 <div className="dim">
-                  {[d.width && d.height && `${d.width} × ${d.height}`, formatBytes(d.size), d.duration && formatDuration(d.duration)].filter(Boolean).join(" · ")}
+                  {[
+                    d.width && d.height && `${d.width} × ${d.height}`,
+                    formatBytes(d.size),
+                    d.duration && formatDuration(d.duration),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </div>
                 <div className="dim break small">{d.path}</div>
                 <div className="row">

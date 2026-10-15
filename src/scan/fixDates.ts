@@ -29,7 +29,9 @@ export async function applyDateInference(only?: Iterable<number>): Promise<Recor
     }),
   );
 
-  const fixes = inferDates(rows, (ms) => -new Date(ms).getTimezoneOffset()).filter((f) => !targets || targets.has(f.id));
+  const fixes = inferDates(rows, (ms) => -new Date(ms).getTimezoneOffset()).filter(
+    (f) => !targets || targets.has(f.id),
+  );
   const set = db.prepare(`UPDATE photos SET taken_local = ?, tz_offset = ?, time_source = ? WHERE id = ?`);
   db.transaction(() => {
     for (const f of fixes) set.run(f.local, f.offset, f.source, f.id);
