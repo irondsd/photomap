@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Map as MlMap, LngLatBoundsLike } from "maplibre-gl";
-import { ALL_KINDS, inBBox, loadPoints, lowerBound, nf, type BBox, type Points, type Range } from "./data";
+import { ALL_KINDS, inBBox, loadPoints, lowerBound, type BBox, type Points, type Range } from "./data";
 import { ClusterClient, type Cluster, type ClusterResult } from "./clusterClient";
 import { MapView } from "./MapView";
 import { Timeline } from "./Timeline";
@@ -82,6 +82,17 @@ function boundsOf(p: Points, range: Range | null, kinds: number): LngLatBoundsLi
   ];
 }
 
+type ThemePref = "system" | "light" | "dark";
+
+function savedTheme(): ThemePref {
+  try {
+    const t = localStorage.getItem("pm.theme");
+    return t === "light" || t === "dark" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+
 function usePrefersDark() {
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
   useEffect(() => {
@@ -91,6 +102,75 @@ function usePrefersDark() {
     return () => mq.removeEventListener("change", on);
   }, []);
   return dark;
+}
+
+/** The chosen theme and whether it resolves to dark. The resolved theme is put on <html data-theme>. */
+function useTheme() {
+  const [pref, setPrefState] = useState<ThemePref>(savedTheme);
+  const systemDark = usePrefersDark();
+  const dark = pref === "system" ? systemDark : pref === "dark";
+  // A layout effect, so it lands before the timeline's effect repaints its canvas from the CSS colors.
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }, [dark]);
+  const setPref = useCallback((t: ThemePref) => {
+    setPrefState(t);
+    try {
+      if (t === "system") localStorage.removeItem("pm.theme");
+      else localStorage.setItem("pm.theme", t);
+    } catch {
+      // Storage can be unavailable; the theme just won't be remembered.
+    }
+  }, []);
+  return { pref, setPref, dark };
+}
+
+const THEMES: { value: ThemePref; label: string; icon: React.ReactNode }[] = [
+  {
+    value: "system",
+    label: "System theme",
+    icon: (
+      <>
+        <rect x="2" y="3" width="12" height="8.5" rx="1.5" />
+        <path d="M5.5 14h5M8 11.5V14" />
+      </>
+    ),
+  },
+  {
+    value: "light",
+    label: "Light theme",
+    icon: (
+      <>
+        <circle cx="8" cy="8" r="2.75" />
+        <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.06 1.06M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06" />
+      </>
+    ),
+  },
+  {
+    value: "dark",
+    label: "Dark theme",
+    icon: <path d="M13.5 9.8A5.75 5.75 0 0 1 6.2 2.5a5.75 5.75 0 1 0 7.3 7.3Z" />,
+  },
+];
+
+function ThemeSwitch(props: { value: ThemePref; onChange: (t: ThemePref) => void }) {
+  return (
+    <div className="segmented segmented-icons" role="group" aria-label="Theme">
+      {THEMES.map((t) => (
+        <button
+          key={t.value}
+          aria-pressed={props.value === t.value}
+          aria-label={t.label}
+          title={t.label}
+          onClick={() => props.onChange(t.value)}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden>
+            {t.icon}
+          </svg>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 const EMPTY = new Int32Array(0);
@@ -105,7 +185,7 @@ function savedMode(): Mode {
 
 export function App() {
   const initialHash = useRef(readHash()).current;
-  const dark = usePrefersDark();
+  const { pref: theme, setPref: setTheme, dark } = useTheme();
   const [mode, setModeState] = useState<Mode>(() => initialHash.mode ?? savedMode());
   // Each view is built the first time it's shown, then kept (map position, gallery scroll).
   // A map created while hidden has no size and would fit its bounds to nothing.
@@ -359,12 +439,7 @@ export function App() {
                 : `Indexing ${Math.round((scan.processed / Math.max(1, scan.found)) * 100)}%`}
             </button>
           )}
-          {stats && stats.total > 0 && (
-            <span className="dim small">
-              {mode === "map" ? `${nf.format(result.total)} on map · ` : ""}
-              {nf.format(stats.total)} total
-            </span>
-          )}
+          <ThemeSwitch value={theme} onChange={setTheme} />
           <button className="btn" onClick={() => setLibraryOpen(true)}>
             Library
           </button>
