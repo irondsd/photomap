@@ -26,7 +26,10 @@ export type TimeSource =
   // Set after scanning, from other files in the same folder (see dates.ts):
   | "original" // copied from the unedited original next to an edited copy
   | "sequence" // estimated from the files numbered before and after it
-  | "folder"; // only the year, from the folder name
+  | "folder" // only the year, from the folder name
+  // Set by hand in the app (see manualDates.ts):
+  | "manual" // date and time
+  | "manual-date"; // only the day, stored at noon
 
 const MIN_YEAR = 1826;
 
@@ -267,7 +270,7 @@ export function resolveTime(i: TimeInput): TimeResult | null {
  * Re-derives a photo's local time after its location changes (manual tag, inference, undo).
  * - Real instants (video creation_time, file mtime) were placed in the Mac's own zone when
  *   there was no location; they move into the zone at the new location.
- * - EXIF wall times stay put but gain (or lose) the offset implied by the location.
+ * - EXIF and hand-set wall times stay put but gain (or lose) the offset implied by the location.
  * Everything else already knows its offset or can't be improved.
  */
 export function relocalize(t: TimeResult, lat: number | null, lon: number | null): TimeResult {
@@ -276,6 +279,10 @@ export function relocalize(t: TimeResult, lat: number | null, lon: number | null
     const utc = t.local - t.offset! * 60;
     const off = geoOffset(lat, lon, utc) ?? localOffsetAtInstant(utc * 1000);
     return { local: utc + off * 60, offset: off, source: t.source };
+  }
+  if (t.source === "manual" || t.source === "manual-date") {
+    // The wall time is what the person typed; only the offset follows the location.
+    return { local: t.local, offset: geoOffset(lat, lon, t.local), source: t.source };
   }
   if (t.source === "exif" || t.source === "exif+geotz") {
     const off = geoOffset(lat, lon, t.local);

@@ -4,6 +4,7 @@ import { HOST, PORT, CPUS } from './config'
 import { db, getPhoto, getRoot, getRoots, removeRoot, stats, cameraName, type RootRow } from './db'
 import { registerTarget, type ScanTarget } from './scan/roots'
 import { restoreFromFile, setLocation } from './scan/locate'
+import { isManualDate, parseManualDate, resetManualDates, setManualDate } from './scan/manualDates'
 import { scanRoot, cancelScan, status as scanStatus } from './scan/scanner'
 import { getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from './thumbs'
 
@@ -53,14 +54,14 @@ function sourceCode(gps: string | null): number {
  *   u32 count, u32 jsonBytes | JSON country names, padded to 8 bytes
  *   | f64 t[n] | f32 lat[n] | f32 lon[n] | f32 aspect[n] | u32 id[n]
  *   | u16 country[n] (0 = none, else 1 + index into the names) | u8 kind[n] | u8 source[n]
- *   | u8 datePrecision[n] (0 exact, 1 estimated, 2 year only, 3 unknown)
- * Missing time/coords/aspect are NaN. ~30 bytes per photo.
+ *   | u8 datePrecision[n] (0 exact, 1 estimated, 2 year only, 3 unknown) | u8 dateManual[n] (1 = set by hand)
+ * Missing time/coords/aspect are NaN. ~31 bytes per photo.
  */
 /** How far a photo's date can be trusted, from its time source. */
 function datePrecision(ts: string | null): number {
   if (ts === 'mtime' || ts == null) return 3
   if (ts === 'folder') return 2
-  if (ts === 'sequence' || ts === 'gps-date' || ts === 'edited') return 1
+  if (ts === 'sequence' || ts === 'gps-date' || ts === 'edited' || ts === 'manual-date') return 1
   return 0
 }
 
@@ -85,7 +86,7 @@ function encodePoints(): ArrayBuffer {
   }
   const json = new TextEncoder().encode(JSON.stringify(countries))
   const head = 8 + Math.ceil(json.length / 8) * 8
-  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1 + 1))
+  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1 + 1 + 1))
   new Uint32Array(buf, 0, 2).set([n, json.length])
   new Uint8Array(buf, 8, json.length).set(json)
   let off = head
@@ -103,6 +104,7 @@ function encodePoints(): ArrayBuffer {
   const kind = col(Uint8Array, 1)
   const source = col(Uint8Array, 1)
   const precision = col(Uint8Array, 1)
+  const dateManual = col(Uint8Array, 1)
   for (let i = 0; i < n; i++) {
     const r = rows[i]!
     t[i] = r.t ?? NaN
@@ -114,6 +116,7 @@ function encodePoints(): ArrayBuffer {
     kind[i] = KIND_CODE[r.kind] ?? 0
     source[i] = sourceCode(r.gps)
     precision[i] = datePrecision(r.ts)
+    dateManual[i] = isManualDate(r.ts) ? 1 : 0
   }
   return buf
 }
@@ -312,6 +315,61 @@ const server = Bun.serve({
         }
         dataVersion = Date.now()
         return json({ reset })
+      }),
+    },
+
+    // Dates set by hand, for photos whose files have none (or a wrong one).
+    '/api/photos/:id/date': {
+      POST: guard(async (req) => {
+        const id = idParam(req.params.id)
+        const p = id && getPhoto(id)
+        if (!p) return bad('not found', 404)
+        const body = (await req.json().catch(() => null)) as { date?: unknown; time?: unknown } | null
+        const d = parseManualDate(body?.date, body?.time)
+        if (!d) return bad('date must be YYYY-MM-DD, and time HH:MM if given')
+        setManualDate(p.id, d)
+        dataVersion = Date.now()
+        const updated = getPhoto(p.id)!
+        return json({ ...updated, camera: cameraName(updated.make, updated.model) })
+      }),
+      // Undo: back to the date from the file, or inferred from the files around it.
+      DELETE: guard(async (req) => {
+        const id = idParam(req.params.id)
+        const p = id && getPhoto(id)
+        if (!p) return bad('not found', 404)
+        if (!isManualDate(p.time_source)) return bad('Only dates set by hand can be reset', 409)
+        if (p.missing) return bad('The file is no longer on disk', 409)
+        await resetManualDates([p.id])
+        dataVersion = Date.now()
+        const updated = getPhoto(p.id)!
+        return json({ ...updated, camera: cameraName(updated.make, updated.model) })
+      }),
+    },
+
+    '/api/dates': {
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { ids?: unknown; date?: unknown; time?: unknown } | null
+        const ids = parseIds(body?.ids)
+        const d = parseManualDate(body?.date, body?.time)
+        if (!ids) return bad('ids must be a non-empty list of photo ids')
+        if (!d) return bad('date must be YYYY-MM-DD, and time HH:MM if given')
+        let changed = 0
+        db.transaction(() => {
+          for (const id of ids) if (setManualDate(id, d)) changed++
+        })()
+        dataVersion = Date.now()
+        return json({ changed })
+      }),
+    },
+
+    '/api/dates/reset': {
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { ids?: unknown } | null
+        const ids = parseIds(body?.ids)
+        if (!ids) return bad('ids must be a non-empty list of photo ids')
+        const reset = await resetManualDates(ids)
+        dataVersion = Date.now()
+        return json({ reset: reset.length })
       }),
     },
 

@@ -17,6 +17,8 @@ export interface Points {
   source: Uint8Array;
   /** How far the date can be trusted; see PRECISION. */
   precision: Uint8Array;
+  /** 1 when the date was set by hand. */
+  dateManual: Uint8Array;
 }
 
 export const PRECISION = { exact: 0, estimated: 1, year: 2, unknown: 3 } as const;
@@ -47,9 +49,10 @@ export async function loadPoints(): Promise<Points> {
   const kind = col(Uint8Array, 1);
   const source = col(Uint8Array, 1);
   const precision = col(Uint8Array, 1);
+  const dateManual = col(Uint8Array, 1);
   let dated = n;
   while (dated > 0 && Number.isNaN(t[dated - 1]!)) dated--;
-  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source, precision };
+  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source, precision, dateManual };
 }
 
 /** First index with t >= x, within the dated prefix. */
@@ -222,4 +225,18 @@ export function nearestTagged(points: Points, i: number, skip?: (j: number) => b
     at: { lat: points.lat[best]!, lon: points.lon[best]! },
     label: `where your photo from ${formatGap(dt)} ${dt < 0 ? "earlier" : "later"} was taken`,
   };
+}
+
+export function localStorageGet(k: string): string | null {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+
+export function localStorageSet(k: string, v: string) {
+  try {
+    localStorage.setItem(k, v);
+  } catch {}
 }

@@ -6,6 +6,7 @@ import { extract } from "./extract";
 import { keepAssignedLocation } from "./locate";
 import { applyDateInference } from "./fixDates";
 import { INFERRED_DATE_SOURCES } from "./dates";
+import { keepManualDate } from "./manualDates";
 
 /**
  * Bump when extraction can find something it couldn't before (2: XMP dates, GPS clock,
@@ -158,6 +159,8 @@ export async function scanRoot(root: RootRow, onProgress?: ProgressFn, subdir: s
             // Still no GPS in the file: keep the backfill's estimate (the next backfill run refreshes it).
             meta = keepAssignedLocation(meta, prev.lat, prev.lon, prev.gps_source as `inferred:${string}`);
           }
+          // So does a date set by hand.
+          if (prev) meta = keepManualDate(meta, prev);
           if (meta.error) status.errors++;
           pendingUpserts.push({
             root_id: root.id,

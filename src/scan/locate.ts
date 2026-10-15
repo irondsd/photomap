@@ -1,6 +1,7 @@
 import { db, getPhoto } from "../db";
 import { countryAt, extract, type Extracted } from "./extract";
 import { relocalize, type TimeSource } from "./datetime";
+import { keepManualDate } from "./manualDates";
 
 /** Location sources that came from a person or an inference, never from the file itself. */
 export type AssignedSource = "manual" | `inferred:${string}`;
@@ -55,12 +56,12 @@ const restoreStmt = db.prepare(
 /**
  * Drops a location set by hand and goes back to what the file itself says: its own GPS
  * (and the time zone that implies), or no location. Re-reads the file so the result is
- * exactly what a fresh scan would produce.
+ * exactly what a fresh scan would produce. A date set by hand stays.
  */
 export async function restoreFromFile(id: number): Promise<void> {
   const p = getPhoto(id);
   if (!p) return;
-  const meta = await extract(p.path, p.kind, p.name, p.mtime);
+  const meta = keepManualDate(await extract(p.path, p.kind, p.name, p.mtime), p);
   restoreStmt.run(
     meta.lat, meta.lon, meta.alt, meta.gps_source, meta.country_code, meta.country,
     meta.taken_local, meta.tz_offset, meta.time_source, id,

@@ -4,9 +4,11 @@ import { inferDates, INFERRED_DATE_SOURCES, type DateFix, type DateRow } from ".
 
 /**
  * Runs date inference (dates.ts) over the whole library and stores the result.
- * Returns how many photos each source now covers.
+ * Returns how many photos each source now covers. With `only`, the whole library is still
+ * read as evidence, but only those photos are updated.
  */
-export async function applyDateInference(): Promise<Record<DateFix["source"], number>> {
+export async function applyDateInference(only?: Iterable<number>): Promise<Record<DateFix["source"], number>> {
+  const targets = only ? new Set(only) : null;
   const rows = db
     .query<DateRow & { path: string }, []>(
       `SELECT p.id, r.path || '/' || p.rel_dir AS dir, p.path, p.name, p.taken_local AS t, p.tz_offset AS offset,
@@ -16,7 +18,7 @@ export async function applyDateInference(): Promise<Record<DateFix["source"], nu
     .all();
 
   // Editor save times, only for photos still without a date of their own.
-  const undated = rows.filter((r) => INFERRED_DATE_SOURCES.has(r.source ?? "mtime"));
+  const undated = rows.filter((r) => INFERRED_DATE_SOURCES.has(r.source ?? "mtime") && (!targets || targets.has(r.id)));
   let i = 0;
   await Promise.all(
     Array.from({ length: 16 }, async () => {
@@ -27,7 +29,7 @@ export async function applyDateInference(): Promise<Record<DateFix["source"], nu
     }),
   );
 
-  const fixes = inferDates(rows, (ms) => -new Date(ms).getTimezoneOffset());
+  const fixes = inferDates(rows, (ms) => -new Date(ms).getTimezoneOffset()).filter((f) => !targets || targets.has(f.id));
   const set = db.prepare(`UPDATE photos SET taken_local = ?, tz_offset = ?, time_source = ? WHERE id = ?`);
   db.transaction(() => {
     for (const f of fixes) set.run(f.local, f.offset, f.source, f.id);

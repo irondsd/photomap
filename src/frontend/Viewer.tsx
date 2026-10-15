@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatBytes, formatDate, formatDateTime, formatExposure, formatOffset, formatYear, nearestTagged, nf, type Points } from "./data";
+import { formatBytes, formatDate, formatDateTime, formatExposure, formatOffset, formatYear, localStorageGet, localStorageSet, nearestTagged, nf, type Points } from "./data";
+import { DatePicker, toDateInput, type DateInput } from "./DatePicker";
 import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
@@ -40,7 +41,7 @@ interface ViewerProps {
   onIndex(i: number): void;
   onClose(): void;
   onShowOnMap(i: number): void;
-  /** The photo's location was changed; the caller should reload the index. */
+  /** The photo's location or date was changed; the caller should reload the index. */
   onLocationChange(): void;
 }
 
@@ -64,11 +65,31 @@ const TIME_SOURCE_NOTE: Record<string, string> = {
   exif: "Time zone unknown",
 };
 
+const DAY_ONLY = new Set(["gps-date", "edited", "manual-date"]);
+const MANUAL_DATE = new Set(["manual", "manual-date"]);
+
 /** Only as precise as the source allows: a year from a folder name isn't "1 Jan, 00:00". */
 function formatTaken(t: number, source: string | null): string {
   if (source === "folder") return formatYear(t);
-  if (source === "gps-date" || source === "edited") return formatDate(t);
+  if (source && DAY_ONLY.has(source)) return formatDate(t);
   return formatDateTime(t);
+}
+
+/** What the date fields start with: as much as is known, nothing for a guess from the file's modified time. */
+function dateInputOf(d: PhotoDetail): DateInput | null {
+  if (d.taken_local == null || d.time_source == null || d.time_source === "mtime" || d.time_source === "folder") return null;
+  return toDateInput(d.taken_local, !DAY_ONLY.has(d.time_source));
+}
+
+async function sendDate(id: number, v: DateInput | null): Promise<PhotoDetail> {
+  const r = await fetch(`/api/photos/${id}/date`, {
+    method: v ? "POST" : "DELETE",
+    headers: v ? { "content-type": "application/json" } : undefined,
+    body: v ? JSON.stringify({ date: v.date, time: v.time || null }) : undefined,
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "Couldn't save the date");
+  return j;
 }
 
 async function sendLocation(id: number, c: LatLon | null): Promise<PhotoDetail> {
@@ -95,11 +116,13 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
   const [loaded, setLoaded] = useState(false);
   const [showInfo, setShowInfo] = useState(() => localStorageGet("pm.info") !== "0");
   const [editing, setEditing] = useState(false);
+  const [editingDate, setEditingDate] = useState(false);
   const hint = useMemo(() => (editing && i != null ? nearestTagged(points, i) : null), [editing, points, i]);
 
   useEffect(() => {
     setLoaded(false);
     setEditing(false);
+    setEditingDate(false);
     const ac = new AbortController();
     fetch(`/api/photos/${id}`, { signal: ac.signal })
       .then((r) => r.json())
@@ -146,6 +169,16 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
   const resetLocation = () => {
     const ok = confirm("Undo the location you set?\n\nThe photo goes back to the location stored in its file, or to no location if the file has none.");
     if (ok) saveLocation(null).catch((err) => alert(err.message));
+  };
+  const saveDate = async (v: DateInput | null) => {
+    const updated = await sendDate(id, v);
+    setDetail(updated);
+    setEditingDate(false);
+    onLocationChange();
+  };
+  const resetDate = () => {
+    const ok = confirm("Undo the date you set?\n\nThe photo goes back to the date stored in its file, or worked out from the files around it.");
+    if (ok) saveDate(null).catch((err) => alert(err.message));
   };
   const settings = d && [d.fnumber && `ƒ/${+d.fnumber.toFixed(1)}`, formatExposure(d.exposure), d.iso && `ISO ${d.iso}`, d.focal && `${+d.focal.toFixed(1)} mm`].filter(Boolean);
 
@@ -197,13 +230,36 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
             <div className="dim">Loading…</div>
           ) : (
             <>
-              <section>
-                <h3>{d.taken_local != null ? formatTaken(d.taken_local, d.time_source) : "Unknown date"}</h3>
-                <div className="dim">
-                  {formatOffset(d.tz_offset)}
-                  {d.time_source && TIME_SOURCE_NOTE[d.time_source] && <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>}
-                </div>
-              </section>
+              {editingDate ? (
+                <section>
+                  <h4>{dateInputOf(d) ? "Change date" : "Add date"}</h4>
+                  <DatePicker
+                    initial={dateInputOf(d)}
+                    hint={d.time_source === "folder" && d.taken_local != null ? `The folder name says ${formatYear(d.taken_local)}.` : null}
+                    onSave={saveDate}
+                    onCancel={() => setEditingDate(false)}
+                  />
+                </section>
+              ) : (
+                <section>
+                  <h3>{d.taken_local != null ? formatTaken(d.taken_local, d.time_source) : "Unknown date"}</h3>
+                  <div className="dim">
+                    {formatOffset(d.tz_offset)}
+                    {d.time_source && MANUAL_DATE.has(d.time_source) && <div className="small">Set by you</div>}
+                    {d.time_source && TIME_SOURCE_NOTE[d.time_source] && <div className="note">{TIME_SOURCE_NOTE[d.time_source]}</div>}
+                  </div>
+                  <div className="row">
+                    <button className="btn btn-small" onClick={() => setEditingDate(true)}>
+                      {dateInputOf(d) ? "Change date" : "Add date"}
+                    </button>
+                    {d.time_source && MANUAL_DATE.has(d.time_source) && (
+                      <button className="btn btn-small" onClick={resetDate} title="Go back to the date stored in the file">
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {editing ? (
                 <section>
@@ -291,17 +347,4 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
       )}
     </div>
   );
-}
-
-function localStorageGet(k: string): string | null {
-  try {
-    return localStorage.getItem(k);
-  } catch {
-    return null;
-  }
-}
-function localStorageSet(k: string, v: string) {
-  try {
-    localStorage.setItem(k, v);
-  } catch {}
 }

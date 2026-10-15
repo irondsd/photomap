@@ -39,8 +39,10 @@ export interface DateFix {
 
 /** Sources this step owns: recomputed on every run. */
 export const INFERRED_DATE_SOURCES = new Set(["mtime", "original", "sequence", "edited", "folder"]);
+/** Dates set by hand: never replaced by inference or a rescan, and not used as evidence for other photos. */
+export const MANUAL_DATE_SOURCES = new Set(["manual", "manual-date"]);
 /** Dates too vague to line photos up in time (backfill, sequence anchors). */
-export const VAGUE_DATE_SOURCES = new Set(["mtime", "sequence", "edited", "folder", "gps-date"]);
+export const VAGUE_DATE_SOURCES = new Set(["mtime", "sequence", "edited", "folder", "gps-date", "manual-date"]);
 
 const SEQ_SAME_DAY_S = 24 * 3600;
 const SEQ_ONE_SIDE_MAX_STEP = 3;
@@ -70,7 +72,8 @@ export function folderYear(dir: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-const exact = (r: DateRow) => r.t != null && !INFERRED_DATE_SOURCES.has(r.source ?? "mtime") && !VAGUE_DATE_SOURCES.has(r.source ?? "");
+const exact = (r: DateRow) =>
+  r.t != null && !INFERRED_DATE_SOURCES.has(r.source ?? "mtime") && !VAGUE_DATE_SOURCES.has(r.source ?? "") && !MANUAL_DATE_SOURCES.has(r.source ?? "");
 
 /** A date from another year than its folder's, and not just across New Year. */
 export function contradictsFolder(t: number, year: number): boolean {

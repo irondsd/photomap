@@ -574,6 +574,8 @@ h1, h2, h3, h4 {
   border: 1px solid #333;
 }
 .picker .input { width: 100%; flex: none; }
+.picker .date-fields .input { width: auto; flex: 1 1 120px; }
+.viewer-info .input { color-scheme: dark; }
 .picker-hint {
   width: 12px;
   height: 12px;

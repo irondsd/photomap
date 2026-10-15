@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatMonth, formatYear, nf, SOURCE, type Points } from "./data";
-import { buildLayout, firstVisible, galleryOrder, groupAt, HEADER_H, type Layout } from "./galleryLayout";
+import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, type Points } from "./data";
+import { buildLayout, firstVisible, galleryOrder, groupAt, HEADER_H, rowHeightFor, type Layout } from "./galleryLayout";
+import { BulkDateDialog } from "./BulkDate";
 import { BulkLocationDialog } from "./BulkLocation";
 
 // Room on the left for the day headers' select-all checks.
 const LEFT = 44;
 const SCRUBBER_W = 56;
 const OVERSCAN = 800;
+// Shift/Cmd/Ctrl + scroll (or a trackpad pinch) scales the rows by this much.
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 3;
+const ZOOM_KEY = "pm.galleryZoom";
 
 interface GalleryProps {
   points: Points;
@@ -17,18 +22,20 @@ interface GalleryProps {
   paused: boolean;
   indexOf(id: number): number | undefined;
   onOpen(list: Int32Array, index: number): void;
-  /** Locations were changed in bulk; reload the index. */
+  /** Locations or dates were changed in bulk; reload the index. */
   onLocationsChanged(): void;
 }
 
 export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLocationsChanged }: GalleryProps) {
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [scrollTop, setScrollTop] = useState(0);
   // Photo ids, so a selection survives the index being reloaded.
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDateOpen, setBulkDateOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useLayoutEffect(() => {
@@ -43,7 +50,14 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
 
   const order = useMemo(() => galleryOrder(points, kinds), [points, kinds]);
   const contentW = Math.max(0, box.w - LEFT - SCRUBBER_W);
-  const layout = useMemo(() => (contentW > 0 ? buildLayout(points, order, contentW, LEFT) : null), [points, order, contentW]);
+  const [zoom, setZoom] = useState(() => {
+    const z = Number(localStorageGet(ZOOM_KEY));
+    return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1;
+  });
+  const layout = useMemo(
+    () => (contentW > 0 ? buildLayout(points, order, contentW, LEFT, rowHeightFor(contentW) * zoom) : null),
+    [points, order, contentW, zoom],
+  );
 
   // Scroll position, at most once per frame.
   const frame = useRef(0);
@@ -57,6 +71,57 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
       setScrollTop(el.scrollTop);
     });
   };
+
+  // ------------------------------------------------------------ zoom
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const zoomRef = useRef(zoom);
+  // The photo under the cursor when zooming started, kept there as the rows resize.
+  const zoomAnchor = useRef<{ k: number; f: number; px: number; clientY: number } | null>(null);
+  const zoomFrame = useRef(0);
+
+  useEffect(() => {
+    const el = scroller.current!;
+    const onWheel = (e: WheelEvent) => {
+      // Ctrl is also what a trackpad pinch reports.
+      if (!e.shiftKey && !e.metaKey && !e.ctrlKey) return;
+      e.preventDefault();
+      const l = layoutRef.current;
+      if (!l || !l.order.length) return;
+      // Browsers turn Shift + wheel into horizontal scrolling.
+      const delta = (e.deltaY || e.deltaX) * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 600 : 1);
+      // Pinches report small deltas; a mouse notch is ~100.
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomRef.current * Math.exp(-delta * (e.ctrlKey && !e.shiftKey ? 0.01 : 0.002))));
+      if (z === zoomRef.current) return;
+      zoomRef.current = z;
+      if (!zoomAnchor.current) {
+        const cy = e.clientY - content.current!.getBoundingClientRect().top;
+        const k = Math.min(l.order.length - 1, firstVisible(l.y, l.h, l.order.length, cy));
+        const y = l.y[k]!;
+        const h = l.h[k]!;
+        // Above the tile means a day header, which doesn't scale.
+        zoomAnchor.current = cy < y ? { k, f: 0, px: cy - y, clientY: e.clientY } : { k, f: (cy - y) / h, px: 0, clientY: e.clientY };
+      }
+      cancelAnimationFrame(zoomFrame.current);
+      zoomFrame.current = requestAnimationFrame(() => {
+        setZoom(zoomRef.current);
+        localStorageSet(ZOOM_KEY, String(zoomRef.current));
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    const a = zoomAnchor.current;
+    zoomAnchor.current = null;
+    if (!a || !layout || a.k >= layout.order.length) return;
+    const el = scroller.current!;
+    const at = content.current!.getBoundingClientRect().top + layout.y[a.k]! + a.f * layout.h[a.k]! + a.px;
+    el.scrollTop += at - a.clientY;
+    saved.current = el.scrollTop;
+    setScrollTop(el.scrollTop);
+  }, [layout]);
 
   // Hiding the gallery (display: none) resets its scroll position; put it back when shown.
   useLayoutEffect(() => {
@@ -129,6 +194,10 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
     () => visibleSelection.filter((id) => points.source[indexOf(id) ?? -1] === SOURCE.manual),
     [visibleSelection, points, indexOf],
   );
+  const manualDateIds = useMemo(
+    () => visibleSelection.filter((id) => points.dateManual[indexOf(id) ?? -1] === 1),
+    [visibleSelection, points, indexOf],
+  );
 
   useEffect(() => {
     if (!active || paused) return;
@@ -149,6 +218,22 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
     setBusy(true);
     try {
       const r = await fetch("/api/locations/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: manualIds }) });
+      if (!r.ok) throw new Error((await r.json()).error ?? "Couldn't reset");
+      clear();
+      onLocationsChanged();
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetSelectedDates = async () => {
+    const n = manualDateIds.length;
+    if (!confirm(`Undo the date you set on ${nf.format(n)} photo${n === 1 ? "" : "s"}?\n\nEach goes back to the date stored in its file, or worked out from the files around it.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/dates/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: manualDateIds }) });
       if (!r.ok) throw new Error((await r.json()).error ?? "Couldn't reset");
       clear();
       onLocationsChanged();
@@ -210,7 +295,7 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
   return (
     <div className={`gallery ${selecting ? "is-selecting" : ""}`}>
       <div ref={scroller} className="gallery-scroll" onScroll={onScroll}>
-        <div className="gallery-content" style={{ height: layout?.height ?? 0 }}>
+        <div ref={content} className="gallery-content" style={{ height: layout?.height ?? 0 }}>
           {items}
         </div>
         {layout && layout.order.length === 0 && <div className="empty">No photos match this filter.</div>}
@@ -229,12 +314,34 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
           <button className="btn btn-primary" disabled={!visibleSelection.length || busy} onClick={() => setBulkOpen(true)}>
             Set location…
           </button>
+          <button className="btn btn-primary" disabled={!visibleSelection.length || busy} onClick={() => setBulkDateOpen(true)}>
+            Set date…
+          </button>
           {manualIds.length > 0 && (
             <button className="btn" disabled={busy} onClick={resetSelected} title="Go back to the locations stored in the files">
-              Reset {manualIds.length < visibleSelection.length ? nf.format(manualIds.length) : ""}
+              Reset {manualIds.length < visibleSelection.length ? nf.format(manualIds.length) : ""} location{manualIds.length === 1 ? "" : "s"}
+            </button>
+          )}
+          {manualDateIds.length > 0 && (
+            <button className="btn" disabled={busy} onClick={resetSelectedDates} title="Go back to the dates stored in the files">
+              Reset {manualDateIds.length < visibleSelection.length ? nf.format(manualDateIds.length) : ""} date{manualDateIds.length === 1 ? "" : "s"}
             </button>
           )}
         </div>
+      )}
+
+      {bulkDateOpen && (
+        <BulkDateDialog
+          points={points}
+          ids={visibleSelection}
+          indexOf={indexOf}
+          onClose={() => setBulkDateOpen(false)}
+          onDone={() => {
+            setBulkDateOpen(false);
+            clear();
+            onLocationsChanged();
+          }}
+        />
       )}
 
       {bulkOpen && (

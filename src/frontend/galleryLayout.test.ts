@@ -20,6 +20,7 @@ function points(items: [number, number, number?][]): Points {
     countries: ["Russia", "Georgia"],
     source: new Uint8Array(n),
     precision: new Uint8Array(n),
+    dateManual: new Uint8Array(n),
   };
 }
 
@@ -58,6 +59,15 @@ describe("buildLayout", () => {
     const last = row[row.length - 1]!;
     expect(l.x[last]! + l.w[last]!).toBeCloseTo(W, 3);
     expect(l.x[row[1]!]! - (l.x[row[0]!]! + l.w[row[0]!]!)).toBeCloseTo(GAP, 3);
+  });
+
+  test("a larger row height puts fewer photos in a row", () => {
+    const p = points(Array.from({ length: 20 }, (_, i) => [5 * DAY + i, 1] as [number, number]));
+    const perRow = (l: ReturnType<typeof buildLayout>) => [...l.order.keys()].filter((k) => l.y[k] === l.y[0]).length;
+    const small = buildLayout(p, galleryOrder(p, 7), W, 0, 100);
+    const big = buildLayout(p, galleryOrder(p, 7), W, 0, 400);
+    expect(perRow(small)).toBeGreaterThan(perRow(big));
+    expect(big.h[0]!).toBeGreaterThan(small.h[0]!);
   });
 
   test("a day's short last row keeps the target height", () => {

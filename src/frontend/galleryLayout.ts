@@ -66,7 +66,7 @@ export function galleryOrder(p: Points, kinds: number): Int32Array {
  * Google-Photos-style justified rows, grouped by day. Each full row is scaled so it fills
  * `width` exactly; a day's last row keeps the target height instead of being blown up.
  */
-export function buildLayout(p: Points, order: Int32Array, width: number, left = 0): Layout {
+export function buildLayout(p: Points, order: Int32Array, width: number, left = 0, target = rowHeightFor(width)): Layout {
   const n = order.length;
   const x = new Float32Array(n);
   const y = new Float32Array(n);
@@ -74,7 +74,6 @@ export function buildLayout(p: Points, order: Int32Array, width: number, left = 
   const h = new Float32Array(n);
   const group = new Int32Array(n);
   const groups: Group[] = [];
-  const target = rowHeightFor(width);
   let top = 0;
 
   let k = 0;
