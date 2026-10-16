@@ -1,6 +1,6 @@
 # Photomap
 
-Your local photo library on a world map, with a zoomable timeline that acts as a filter. Everything runs on your machine, and your photos are only ever read.
+Your local photo library on a world map, with a zoomable timeline that acts as a filter. Everything runs on your machine, and your photos are only ever read, unless you run `bun run writeback --apply`.
 
 ## Run
 
@@ -20,6 +20,8 @@ You can also start the server with an empty index and add folders from the UI (*
 | `bun run backfill [-v]`                      | Dry run: estimate locations for photos without GPS from photos taken around them (bursts, same spot before and after, home, nearby)                                                                                                                                                                   |
 | `bun run backfill --apply=high\|medium\|low` | Write those estimates to the index at or above a confidence; files are never touched. `--undo` removes them                                                                                                                                                                                           |
 | `bun run geotag <lat, lon> <from> [to]`      | Tag photos without GPS taken in a time range (local time at that place), e.g. `bun run geotag 48.8584, 2.2945 2019-07-14` or `… "2019-07-14 15:00" "2019-07-14 15:30"`. Coordinates paste straight from Google Maps. `--dry-run` previews, `--clear` removes manual tags. Manual tags survive rescans |
+| `bun run writeback [folder…] [-v]`           | Dry run: list the files whose hand-set dates and locations (from the app or `geotag`) aren't in the file yet. Inferred ones are never written                                                                                                                                                         |
+| `bun run writeback [folder…] --apply`        | Write them into the files with `exiftool`: EXIF date, offset and GPS for photos, QuickTime date and location for videos. The file's modified time is kept, and so is the original as `<name>_original` unless `--no-backup`. Files that already agree are skipped                                     |
 | `bun run start`                              | Run the server without watch mode                                                                                                                                                                                                                                                                     |
 | `bun test`                                   | Run the tests                                                                                                                                                                                                                                                                                         |
 | `bun run typecheck`                          | Type check (`bun check`)                                                                                                                                                                                                                                                                              |
@@ -28,7 +30,7 @@ You can also start the server with an empty index and add folders from the UI (*
 
 Environment: `PORT` (default 3000), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
 
-**Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames. The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
+**Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames, and `exiftool` for `writeback` (`brew install exiftool`). The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
 
 ## Using it
 

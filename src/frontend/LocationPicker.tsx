@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Map as MlMap, Marker, NavigationControl } from "maplibre-gl";
 import { collapseAttribution, STYLE } from "./map";
 import { formatCoords, parseCoords, type LatLon } from "./coords";
+import { searchPlaces, type Place } from "./places";
 
 interface LocationPickerProps {
   /** Current location, when changing one. */
@@ -20,12 +21,23 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
   const [text, setText] = useState(initial ? formatCoords(initial) : "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Text that isn't coordinates is a place search; picking a result or the map clears it.
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Place[]>([]);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+
+  const closeSearch = () => {
+    setQuery("");
+    setResults([]);
+  };
 
   // Position chosen on the map: move the pin and show the numbers.
   const placeFromMap = (c: LatLon) => {
     setPos(c);
     setText(formatCoords(c));
     setError(null);
+    closeSearch();
   };
 
   useEffect(() => {
@@ -82,13 +94,65 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
     pin.current.setLngLat([pos.lon, pos.lat]).addTo(map);
   }, [pos]);
 
+  useEffect(() => {
+    if (query.length < 2) {
+      setResults([]);
+      return;
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(async () => {
+      // Rank places near what the map shows, or near the hint while the map is still the whole world.
+      const map = mapRef.current;
+      const center = map?.getCenter();
+      const near =
+        map && center && map.getZoom() >= 4
+          ? { at: { lat: center.lat, lon: center.lng }, zoom: map.getZoom() }
+          : hint
+            ? { at: hint.at, zoom: 10 }
+            : null;
+      try {
+        const found = await searchPlaces(query, near, ac.signal);
+        setResults(found);
+        setActive(0);
+        setError(
+          found.length
+            ? null
+            : "No places found. You can also paste coordinates like 48.858370, 2.294481 or a Google Maps link",
+        );
+      } catch (err) {
+        if (!ac.signal.aborted) setError((err as Error).message);
+      }
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- searches follow the typed text only.
+  }, [query]);
+
   const onType = (value: string) => {
     setText(value);
+    setError(null);
     const c = parseCoords(value);
-    setError(value.trim() && !c ? "Paste coordinates like 48.858370, 2.294481 or a Google Maps link" : null);
-    if (!c) return;
+    if (!c) {
+      setQuery(value.trim());
+      return;
+    }
+    closeSearch();
     setPos(c);
     mapRef.current?.flyTo({ center: [c.lon, c.lat], zoom: Math.max(mapRef.current.getZoom(), 15), duration: 600 });
+  };
+
+  const pick = (place: Place) => {
+    setPos(place.at);
+    setText(place.context ? `${place.name}, ${place.context}` : place.name);
+    setError(null);
+    closeSearch();
+    const map = mapRef.current;
+    if (!map) return;
+    // Show a whole town or park; zoom right in on a street or a building.
+    if (place.bounds) map.fitBounds(place.bounds, { padding: 32, maxZoom: 16, duration: 600 });
+    else map.flyTo({ center: [place.at.lon, place.at.lat], zoom: 16, duration: 600 });
   };
 
   // With nothing chosen, saving takes the suggested spot: it is usually right.
@@ -111,20 +175,55 @@ export function LocationPicker({ initial, hint, onSave, onCancel }: LocationPick
     <div className="picker">
       <div ref={mapEl} className="picker-map" />
       <input
-        className="input mono"
+        className="input"
         value={text}
         onChange={(e) => onType(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") save();
-          if (e.key === "Escape") onCancel();
+          if (results.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            const step = e.key === "ArrowDown" ? 1 : -1;
+            setActive((active + step + results.length) % results.length);
+          } else if (e.key === "Enter") {
+            if (results.length) pick(results[active]!);
+            // While a search is pending or found nothing, Enter must not save the previous pin.
+            else if (!query) save();
+          } else if (e.key === "Escape") {
+            if (results.length) setResults([]);
+            else onCancel();
+          }
         }}
-        placeholder="Paste coordinates or a Google Maps link"
+        placeholder="Search a place, or paste coordinates or a Google Maps link"
         spellCheck={false}
-        aria-label="Coordinates"
+        autoComplete="off"
+        role="combobox"
+        aria-label="Location"
+        aria-expanded={results.length > 0}
+        aria-controls={listId}
+        aria-activedescendant={results.length ? `${listId}-${active}` : undefined}
         autoFocus
       />
+      {results.length > 0 && (
+        <ul className="picker-results" id={listId} role="listbox">
+          {results.map((r, i) => (
+            <li
+              key={`${r.at.lat},${r.at.lon},${r.name}`}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? "is-active" : undefined}
+              // Keep focus in the box, so Enter and the arrows still work after a click.
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => pick(r)}
+            >
+              <span className="picker-result-name">{r.name}</span>
+              {r.context && <span className="dim small">{r.context}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="dim small">
-        {pos ? "Drag the pin to adjust." : "Click the map to drop a pin."}
+        {pos ? "Drag the pin to adjust." : "Search above, or click the map to drop a pin."}
         {hint && <> The grey dot is {hint.label}.</>}
         {!pos && target && <> Save without a pin to use it.</>}
       </div>

@@ -315,6 +315,14 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
             onLoad={(e) => e.currentTarget.classList.add("is-loaded")}
           />
           {points.kind[i] === 2 && <span className="gtile-video">▶</span>}
+          {Number.isNaN(points.lat[i]!) && (
+            <span className="gtile-nogeo" title="No location">
+              <svg viewBox="0 0 24 24" aria-hidden>
+                <path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 11.6-4M18.3 8.2c.1.6.2 1.2.2 1.8 0 5-6.5 11-6.5 11" />
+                <path d="M4 3l16 18" />
+              </svg>
+            </span>
+          )}
           <button
             className="gcheck"
             aria-pressed={sel}

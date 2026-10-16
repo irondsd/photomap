@@ -754,6 +754,36 @@ h4 {
 .viewer-info .input {
   color-scheme: dark;
 }
+.picker-results {
+  display: grid;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.picker-results li {
+  display: grid;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.picker-results li.is-active {
+  background: var(--panel-2);
+}
+.picker-result-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viewer-info .picker-results {
+  background: #0f0f0f;
+  border-color: #333;
+}
+.viewer-info .picker-results li.is-active {
+  background: #262626;
+}
 .picker-hint {
   width: 12px;
   height: 12px;
@@ -1059,6 +1089,27 @@ h4 {
   color: #fff;
   font-size: 12px;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+/* Photos with no location, so they're easy to spot and fix. */
+.gtile-nogeo {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+}
+.gtile-nogeo svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 /* Selected photos shrink a little inside their cell, like Google Photos.
    (Scaled, not padded: % padding is relative to the whole gallery's width.) */
