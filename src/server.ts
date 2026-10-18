@@ -17,13 +17,15 @@ const currentVersion = () => `${dataVersion}.${dbVersionStmt.get()!.data_version
 
 // ---------------------------------------------------------------- security
 // Only ever serve the local machine: reject foreign Host headers (DNS rebinding)
-// and cross-site writes from pages open in the same browser.
+// and cross-site writes from pages open in the same browser. `*.localhost` is
+// safe to allow: browsers always resolve it to loopback (RFC 6761).
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const isLocalHost = (hostname: string) => LOCAL_HOSTS.has(hostname) || hostname.endsWith(".localhost");
 
 function forbidden(req: Request): boolean {
-  const host = req.headers.get("host") ?? "";
+  const host = (req.headers.get("host") ?? "").toLowerCase();
   const hostname = host.replace(/:\d+$/, "");
-  if (!LOCAL_HOSTS.has(hostname)) return true;
+  if (!isLocalHost(hostname)) return true;
   if (req.method !== "GET" && req.method !== "HEAD") {
     const origin = req.headers.get("origin");
     if (origin && origin !== `http://${host}`) return true;
@@ -495,7 +497,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Photomap running at http://localhost:${server.port}`);
+console.log(`Photomap running at http://photomap.localhost:${server.port}`);
 
 // Catch up on thumbnails a previous run (or a CLI scan) didn't generate.
 if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));

@@ -7,7 +7,7 @@ Your local photo library on a world map, with a zoomable timeline that acts as a
 ```bash
 bun install
 bun run scan ~/Pictures        # index a folder (incremental on later runs)
-bun run dev                    # http://localhost:3000
+bun run dev                    # http://photomap.localhost:4747
 ```
 
 You can also start the server with an empty index and add folders from the UI (**Library → Add & scan**).
@@ -28,7 +28,7 @@ You can also start the server with an empty index and add folders from the UI (*
 | `bun lint` / `bun lint --fix`                | Lint, optionally applying the safe fixes. It's Bun's built-in command; there's no `lint` script because one would shadow it                                                                                                                                                                           |
 | `bun run format` / `bun run format:check`    | Format the codebase (`bun fmt`, Prettier-compatible, configured in `.prettierrc.json`), or only check it                                                                                                                                                                                              |
 
-Environment: `PORT` (default 3000), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
+Environment: `PORT` (default 4747), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
 
 **Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames, and `exiftool` for `writeback` (`brew install exiftool`). The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
 

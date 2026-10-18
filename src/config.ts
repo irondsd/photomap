@@ -6,7 +6,7 @@ export const DATA_DIR = resolve(process.env.PHOTOMAP_DATA ?? join(import.meta.di
 export const DB_PATH = join(DATA_DIR, "index.sqlite");
 export const THUMB_DIR = join(DATA_DIR, "thumbs");
 
-export const PORT = Number(process.env.PORT ?? 3000);
+export const PORT = Number(process.env.PORT ?? 4747);
 export const HOST = process.env.HOST ?? "127.0.0.1";
 
 export const CPUS = availableParallelism();
