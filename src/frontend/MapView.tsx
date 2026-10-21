@@ -3,7 +3,7 @@ import { Map as MlMap, Marker, NavigationControl, ScaleControl, type LngLatBound
 import type { BBox, Points } from "./data";
 import type { Cluster } from "./clusterClient";
 import { nf } from "./data";
-import { STYLE } from "./map";
+import { setMapTheme } from "./map";
 
 export interface MapViewProps {
   points: Points;
@@ -50,11 +50,10 @@ export function MapView(props: MapViewProps) {
   const cb = useRef(props);
   cb.current = props;
 
-  // Create the map once.
+  // Create the map once. The style comes from the theme effect below (only setStyle can transform it).
   useEffect(() => {
     const map = new MlMap({
       container: container.current!,
-      style: props.dark ? STYLE.dark : STYLE.light,
       center: props.initial?.center ?? [10, 30],
       zoom: props.initial?.zoom ?? 1.5,
       bounds: props.initial ? undefined : (props.initialBounds ?? undefined),
@@ -101,7 +100,7 @@ export function MapView(props: MapViewProps) {
 
   // Theme switch.
   useEffect(() => {
-    mapRef.current?.setStyle(props.dark ? STYLE.dark : STYLE.light);
+    if (mapRef.current) setMapTheme(mapRef.current, props.dark);
   }, [props.dark]);
 
   // Sync photo markers with the latest clusters, reusing elements where possible.
