@@ -69,11 +69,13 @@ export function exifOffset(min: number): string {
 
 /**
  * exiftool arguments (before the file path) that write a change. The file's modified time
- * is kept (-P): it's the last-resort date of photos with none in their metadata. Without
- * `overwrite`, exiftool keeps the untouched file next to it as "<name>_original".
+ * is kept (-P): it's the last-resort date of photos with none in their metadata. Minor
+ * errors (-m), such as out-of-order IFD entries or odd MakerNotes offsets that old cameras
+ * and editors leave, would otherwise make exiftool refuse the file. Without `overwrite`,
+ * exiftool keeps the untouched file next to it as "<name>_original".
  */
 export function exiftoolArgs(kind: WritebackRow["kind"], change: Change, overwrite: boolean): string[] {
-  const args = ["-P"];
+  const args = ["-P", "-m"];
   if (overwrite) args.push("-overwrite_original");
   const loc = change.location;
   const date = change.date;
@@ -130,5 +132,7 @@ export async function writeFile(path: string, args: string[]): Promise<string | 
     return null;
   }
   const msg = r.stderr.toString().trim() || r.stdout.toString().trim();
-  return msg.replace(/\s*-\s*\/.*$/gm, "").split("\n")[0] || `exiftool exited with ${r.exitCode}`;
+  // Warnings can come first; the line that explains the refusal starts with "Error:".
+  const lines = msg.replace(/\s*-\s*\/.*$/gm, "").split("\n");
+  return lines.find((l) => l.startsWith("Error:")) ?? (lines[0] || `exiftool exited with ${r.exitCode}`);
 }

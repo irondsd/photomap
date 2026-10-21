@@ -103,6 +103,7 @@ describe("exiftool arguments", () => {
     );
     expect(args).toEqual([
       "-P",
+      "-m",
       "-EXIF:GPSLatitude=33.8568",
       "-EXIF:GPSLatitudeRef=S",
       "-EXIF:GPSLongitude=151.2153",
@@ -116,6 +117,7 @@ describe("exiftool arguments", () => {
     ]);
     expect(exiftoolArgs("photo", { date: { local: 0, offset: null } }, true)).toEqual([
       "-P",
+      "-m",
       "-overwrite_original",
       "-EXIF:DateTimeOriginal=1970:01:01 00:00:00",
       "-EXIF:CreateDate=1970:01:01 00:00:00",
@@ -126,6 +128,7 @@ describe("exiftool arguments", () => {
     const local = utc("2019-07-14T15:00:00");
     expect(exiftoolArgs("video", { location: PARIS, date: { local, offset: 120 } }, false)).toEqual([
       "-P",
+      "-m",
       "-Keys:GPSCoordinates=48.8584, 2.2945",
       "-UserData:GPSCoordinates=48.8584, 2.2945",
       "-Keys:CreationDate=2019:07:14 15:00:00+02:00",
@@ -135,6 +138,7 @@ describe("exiftool arguments", () => {
     ]);
     expect(exiftoolArgs("video", { date: { local, offset: null } }, false)).toEqual([
       "-P",
+      "-m",
       "-Keys:CreationDate=2019:07:14 15:00:00",
     ]);
   });
