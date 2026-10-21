@@ -36,7 +36,8 @@ function Grid({
 
   useLayoutEffect(() => {
     const el = scroller.current!;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
+    // Content box, not clientWidth: cells sit inside the scroller's padding.
+    const ro = new ResizeObserver(([e]) => setBox({ w: e!.contentRect.width, h: e!.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
