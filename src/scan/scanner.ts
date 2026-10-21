@@ -22,9 +22,10 @@ import { keepManualDate } from "./manualDates";
 
 /**
  * Bump when extraction can find something it couldn't before (2: XMP dates, GPS clock,
- * file name timestamps, the Picasa placeholder date). The next scan re-reads every file once.
+ * file name timestamps, the Picasa placeholder date; 3: GoPro video clocks are local time).
+ * The next scan re-reads every file once.
  */
-const EXTRACTOR_VERSION = 2;
+const EXTRACTOR_VERSION = 3;
 
 export interface ScanStatus {
   running: boolean;

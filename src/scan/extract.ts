@@ -203,6 +203,23 @@ export function parseIso6709(s: string | undefined): { lat: number; lon: number;
   return { lat, lon, alt: m[3] ? Number(m[3]) : null };
 }
 
+/** GoPro file names: GOPR0123, GP010123 (chapters), GX010123 (HEVC), GH010123. */
+const GOPRO_NAME = /^G(?:OPR|[PXH]\d\d)\d{4}/i;
+
+/**
+ * GoPro cameras have no time zone setting and write their local clock into creation_time
+ * as if it were UTC. Copies re-muxed by Google Photos lose the GoPro tags but keep the
+ * name and that time, so the name counts too.
+ */
+export function isGoPro(name: string, tags: Record<string, string>, handlers: (string | undefined)[]): boolean {
+  return (
+    GOPRO_NAME.test(name) ||
+    /gopro/i.test(tags["encoder"] ?? "") ||
+    /^H[DX]\d/.test(tags["firmware"] ?? "") ||
+    handlers.some((h) => h != null && /gopro/i.test(h))
+  );
+}
+
 async function extractVideo(path: string, name: string, mtimeMs: number): Promise<Extracted> {
   try {
     const proc = Bun.spawn(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path], {
@@ -248,6 +265,11 @@ async function extractVideo(path: string, name: string, mtimeMs: number): Promis
         video: {
           creationDate: tags["com.apple.quicktime.creationdate"],
           creationTime: tags["creation_time"] ?? vs?.tags?.creation_time,
+          localClock: isGoPro(
+            name,
+            tags,
+            (j.streams ?? []).map((s) => s.tags?.handler_name),
+          ),
         },
       },
     );

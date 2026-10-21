@@ -73,7 +73,7 @@ scan ──► SQLite index (bun:sqlite) ──► Bun.serve ──► React + M
   2. those create/modify dates;
   3. XMP dates;
   4. the GPS clock, or just the GPS date when the time is garbage (some HTC phones);
-  5. video creation tags;
+  5. video creation tags (a GoPro writes its local clock there, though the tag claims UTC);
   6. a date-only filename, or a millisecond timestamp in it (`FB_IMG_1501315576710`);
   7. the file's mtime.
 

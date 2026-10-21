@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { uuidV1Seconds, parseIso6709 } from "./extract";
+import { uuidV1Seconds, parseIso6709, isGoPro } from "./extract";
 
 test("Photoshop instance IDs decode to their save time", () => {
   // From a real export: saved 6 Aug 2012, 09:53:08 UTC.
@@ -20,4 +20,14 @@ test("random (v4) IDs and Adobe's placeholder ID say nothing", () => {
 test("ISO 6709 locations from phone videos", () => {
   expect(parseIso6709("+37.7749-122.4194+010.000/")).toEqual({ lat: 37.7749, lon: -122.4194, alt: 10 });
   expect(parseIso6709("+00.0000+000.0000/")).toBeNull();
+});
+
+test("GoPro videos are recognised by name or by their tags", () => {
+  expect(isGoPro("GOPR0303_1513705367475_high.MP4", {}, [])).toBe(true);
+  expect(isGoPro("GP010123.MP4", {}, [])).toBe(true);
+  expect(isGoPro("GX020045.MP4", {}, [])).toBe(true);
+  expect(isGoPro("clip.mp4", { firmware: "HD5.02.02.60.00" }, [])).toBe(true);
+  expect(isGoPro("clip.mp4", {}, ["\u0010GoPro AVC  "])).toBe(true);
+  expect(isGoPro("VID_20190612_183134.mp4", { encoder: "Lavf58.29.100" }, ["VideoHandle"])).toBe(false);
+  expect(isGoPro("GPS_track.mp4", {}, [])).toBe(false);
 });

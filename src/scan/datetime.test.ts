@@ -92,6 +92,20 @@ describe("resolveTime priority", () => {
     const r = resolveTime({ ...base, lat: 38.72, lon: -9.14, video: { creationTime: "2019-06-12T18:31:34.000000Z" } });
     expect(r).toEqual({ local: wall("2019-06-12T19:31:34"), offset: 60, source: "video" });
   });
+  test("a GoPro's creation_time is its local clock, despite the Z", () => {
+    // GOPR0303 in Peru: the JPG shot just before it says 11:15:05 local.
+    const video = { creationTime: "2017-12-19T11:15:51.000000Z", localClock: true };
+    expect(resolveTime({ ...base, lat: -13.8681, lon: -71.303, video })).toEqual({
+      local: wall("2017-12-19T11:15:51"),
+      offset: -300,
+      source: "video-local",
+    });
+    expect(resolveTime({ ...base, video })).toEqual({
+      local: wall("2017-12-19T11:15:51"),
+      offset: null,
+      source: "video-local",
+    });
+  });
   test("mtime last", () => {
     const r = resolveTime({ ...base, lat: 38.72, lon: -9.14 });
     expect(r).toEqual({ local: wall("2024-01-01T00:00:00"), offset: 0, source: "mtime" });
@@ -112,6 +126,12 @@ describe("relocalize", () => {
       offset: 180,
       source: "exif+geotz",
     });
+  });
+  test("a GoPro clock keeps its wall time and takes the offset where it's placed", () => {
+    const before = { local: wall("2019-07-14T15:00:00"), offset: null, source: "video-local" as const };
+    const placed = { local: wall("2019-07-14T15:00:00"), offset: 180, source: "video-local" as const };
+    expect(relocalize(before, ...ATHENS)).toEqual(placed);
+    expect(relocalize(placed, null, null)).toEqual(before);
   });
   test("removing the location undoes the EXIF offset", () => {
     const tagged = { local: wall("2019-07-14T15:00:00"), offset: 180, source: "exif+geotz" as const };

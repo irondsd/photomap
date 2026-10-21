@@ -76,6 +76,7 @@ const TIME_SOURCE_NOTE: Record<string, string> = {
   folder: "Only the year is known, from the folder name",
   mtime: "Date taken from the file's modified time — may be wrong",
   exif: "Time zone unknown",
+  "video-local": "Camera clock (GoPro); time zone from the location",
 };
 
 const DAY_ONLY = new Set(["gps-date", "edited", "manual-date"]);

@@ -20,6 +20,7 @@ export type TimeSource =
   | "gps-date" // only the GPS date is usable (some HTC phones write garbage times)
   | "video+offset"
   | "video"
+  | "video-local" // creation_time holds the camera's local clock, not UTC (GoPro)
   | "filename" // a wall-clock date in the name (IMG_20190612_142201)
   | "filename-utc" // a millisecond timestamp in the name (FB_IMG_1501315576710)
   | "mtime"
@@ -176,7 +177,8 @@ export interface TimeInput {
     GPSDateStamp?: unknown;
     GPSTimeStamp?: unknown;
   };
-  video?: { creationDate?: string; creationTime?: string };
+  /** `localClock`: the camera writes its own clock into creation_time, not UTC. */
+  video?: { creationDate?: string; creationTime?: string; localClock?: boolean };
   lat?: number | null;
   lon?: number | null;
   name: string;
@@ -247,6 +249,8 @@ export function resolveTime(i: TimeInput): TimeResult | null {
     // creation_time is UTC by spec. 1904/1970 epochs mean "unset".
     const ct = parseDateString(v.creationTime);
     if (ct && ct.wall > Date.UTC(1971, 0, 1) / 1000) {
+      // Cameras without a time zone setting break the spec and write their clock as if it were UTC.
+      if (v.localClock) return { local: ct.wall, offset: geoOffset(i.lat, i.lon, ct.wall), source: "video-local" };
       const utc = ct.wall - (ct.offset ?? 0) * 60;
       const off = geoOffset(i.lat, i.lon, utc) ?? localOffsetAtInstant(utc * 1000);
       return { local: utc + off * 60, offset: off, source: "video" };
@@ -287,6 +291,10 @@ export function relocalize(t: TimeResult, lat: number | null, lon: number | null
   }
   if (t.source === "manual" || t.source === "manual-date") {
     // The wall time is what the person typed; only the offset follows the location.
+    return { local: t.local, offset: geoOffset(lat, lon, t.local), source: t.source };
+  }
+  if (t.source === "video-local") {
+    // A camera clock, like EXIF: the wall time stays and the offset follows the location.
     return { local: t.local, offset: geoOffset(lat, lon, t.local), source: t.source };
   }
   if (t.source === "exif" || t.source === "exif+geotz") {
