@@ -62,6 +62,7 @@ const GPS_SOURCE_NOTE: Record<string, string> = {
   "inferred:stay": "Estimated: photos before and after were taken at this spot",
   "inferred:home": "Estimated: probably home — photos before and after were taken here",
   "inferred:nearby": "Rough estimate: a photo with GPS was taken nearby within the hour",
+  "inferred:series": "Estimated from the photos with GPS before and after this series",
 };
 
 const TIME_SOURCE_NOTE: Record<string, string> = {

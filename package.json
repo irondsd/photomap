@@ -8,6 +8,7 @@
     "dev": "bun --watch src/server.ts",
     "scan": "bun src/scan/cli.ts",
     "backfill": "bun src/scan/backfill-cli.ts",
+    "estimates": "bun src/scan/estimates-cli.ts",
     "geotag": "bun src/scan/geotag-cli.ts",
     "writeback": "bun src/scan/writeback-cli.ts",
     "test": "bun test",

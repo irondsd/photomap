@@ -9,7 +9,7 @@
  */
 import { db } from "../db";
 import { countryAt } from "./extract";
-import { infer, type BackfillPhoto, type Confidence, type Proposal } from "./backfill";
+import { infer, type BackfillPhoto, type Confidence, type Proposal, type Rule } from "./backfill";
 import { setLocation } from "./locate";
 import { VAGUE_DATE_SOURCES } from "./dates";
 
@@ -23,9 +23,22 @@ if (minLevel && !LEVELS.includes(minLevel)) {
   process.exit(1);
 }
 
-/** Removes every inferred location (and the time-zone adjustments that came with it). */
+/**
+ * Sources this tool writes. Other inferred sources (`inferred:series`, estimates reviewed
+ * series by series) are neither evidence nor overwritten here.
+ */
+const RULE_SOURCES = (["burst", "stay", "home", "nearby"] as const satisfies readonly Rule[]).map(
+  (r) => `inferred:${r}`,
+);
+const ownSource = (src: string | null) => src != null && RULE_SOURCES.includes(src);
+
+/** Removes every location this tool inferred (and the time-zone adjustments that came with it). */
 function clearInferred(): number {
-  const ids = db.query<{ id: number }, []>(`SELECT id FROM photos WHERE gps_source LIKE 'inferred:%'`).all();
+  const ids = db
+    .query<{ id: number }, string[]>(
+      `SELECT id FROM photos WHERE gps_source IN (${RULE_SOURCES.map(() => "?").join(", ")})`,
+    )
+    .all(...RULE_SOURCES);
   for (const { id } of ids) setLocation(id, null);
   return ids.length;
 }
@@ -41,14 +54,14 @@ interface Row {
   offset: number | null;
   lat: number | null;
   lon: number | null;
-  inferred: number;
+  src: string | null;
   timeSource: string | null;
   name: string;
   country: string | null;
 }
 const rows: Row[] = db
   .query<Row, []>(
-    `SELECT id, taken_local t, tz_offset offset, lat, lon, gps_source LIKE 'inferred:%' inferred, time_source timeSource, name, country
+    `SELECT id, taken_local t, tz_offset offset, lat, lon, gps_source src, time_source timeSource, name, country
      FROM photos WHERE missing = 0`,
   )
   .all();
@@ -56,18 +69,25 @@ const rows: Row[] = db
 // modified time, a year from the folder, an estimate from numbered neighbours, a day
 // without a time) can't line photos up within minutes, so those photos count as undated.
 const photos: BackfillPhoto[] = rows
-  .map((r) => (r.inferred ? { ...r, lat: null, lon: null } : r))
+  .map((r) => (r.src?.startsWith("inferred:") ? { ...r, lat: null, lon: null } : r))
   .map((r) => ({ ...r, t: r.t != null && !VAGUE_DATE_SOURCES.has(r.timeSource ?? "") ? r.t : NaN }));
 const byId = new Map<number, Row>(rows.map((r): [number, Row] => [r.id, r]));
 
-const { proposals, skipped, homes } = infer(photos);
+const inferred = infer(photos);
+const kept = (id: number) => {
+  const src = byId.get(id)!.src;
+  return !!src?.startsWith("inferred:") && !ownSource(src);
+};
+const { homes } = inferred;
+const proposals = inferred.proposals.filter((p) => !kept(p.id));
+const skipped = inferred.skipped.filter((p) => !kept(p.id));
 
 // ------------------------------------------------------------ report
 const date = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
 const day = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
 const gap = (m: number) =>
   m < 90 ? `${Math.round(m)} min` : m < 48 * 60 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} days`;
-const untagged = photos.filter((p) => p.lat == null).length;
+const untagged = photos.filter((p) => p.lat == null && !kept(p.id)).length;
 
 console.log(`${untagged} photos without a GPS location\n`);
 console.log("Homes detected (places photographed on 20+ distinct days):");
