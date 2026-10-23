@@ -612,12 +612,34 @@ h4 {
 .viewer-stage img.viewer-media.is-loaded {
   opacity: 1;
 }
+.viewer-stage img.viewer-media.is-animating {
+  transition:
+    opacity 150ms,
+    transform 200ms ease-out,
+    width 200ms ease-out,
+    height 200ms ease-out;
+}
+.viewer-stage.is-zoomable {
+  touch-action: none;
+}
+.viewer-stage.is-zoomable img.viewer-media:not(.viewer-placeholder) {
+  cursor: zoom-in;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.viewer-stage.is-zoomed img.viewer-media:not(.viewer-placeholder) {
+  cursor: grab;
+}
+.viewer-stage.is-panning img.viewer-media:not(.viewer-placeholder) {
+  cursor: grabbing;
+}
 .viewer-placeholder {
   width: min(100%, 100vh);
   height: 100vh;
   object-fit: cover;
   filter: blur(30px) brightness(0.6);
   transform: scale(1.1);
+  pointer-events: none; /* backdrop: clicks close the viewer, drags pan */
 }
 .viewer-top {
   position: absolute;

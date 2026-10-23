@@ -1,0 +1,28 @@
+name: photomap
+
+services:
+  app:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      PHOTOMAP_ALLOWED_HOSTS: photomap.local,app.photomap.orb.local
+    labels:
+      dev.orbstack.domains: photomap.local
+      dev.orbstack.http-port: "4747"
+    expose:
+      - "4747"
+    volumes:
+      # Mount the entire directory, including SQLite's WAL and SHM files.
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+      # Keep absolute paths identical to the paths already stored in SQLite.
+      - type: bind
+        source: "${PHOTOMAP_PHOTOS:-${HOME}/Pictures/My Photos}"
+        target: "${PHOTOMAP_PHOTOS:-${HOME}/Pictures/My Photos}"
+        read_only: true
+        bind:
+          create_host_path: false

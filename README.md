@@ -33,6 +33,38 @@ Environment: `PORT` (default 4747), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` 
 
 **Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames, and `exiftool` for `writeback` (`brew install exiftool`). The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
 
+## Docker / OrbStack
+
+With OrbStack running, start Photomap from this project directory:
+
+```bash
+docker compose up -d --build --wait
+```
+
+Open [photomap.local](http://photomap.local), or [HTTPS](https://photomap.local) through OrbStack's automatic HTTPS proxy. The custom domain and proxy port are configured with [OrbStack container labels](https://docs.orbstack.dev/docker/domains); no hosts-file changes are needed.
+
+If a browser reports `ERR_ADDRESS_UNREACHABLE` while another browser or `curl` can reach the app, check **macOS System Settings → Privacy & Security → Local Network** and allow that browser, then fully quit and reopen it. These [permissions are per application](https://support.apple.com/guide/mac-help/mchla4f49138/mac). Also check any local-network permission prompt in the browser itself.
+
+If both the browser and `curl` time out on `photomap.local` while `docker compose ps` shows a healthy app, try `docker compose restart app` to refresh OrbStack's domain routing, then reload the page. This restarts only Photomap and leaves the local data in place.
+
+The container mounts this project's entire `data/` directory at `/app/data`: the SQLite index, its WAL/SHM files, and thumbnail cache stay on the Mac. Location and date edits update the existing `data/index.sqlite`; stopping, rebuilding, or removing the container does not delete them. The database and photos are excluded from the image.
+
+`~/Pictures/My Photos` is mounted read-only at its **same absolute path**, so existing indexed paths keep working without rescanning or rewriting the database. Both CameraRoll and Google Photos remain where they are. To use another library directory, set `PHOTOMAP_PHOTOS` in the shell or a local `.env` file before starting Compose. Its path must match the absolute paths in the index. Additional folders outside that directory need additional bind mounts with matching source and target paths. Missing source directories cause startup to fail rather than creating empty folders.
+
+Use either the Docker server or the native server at a time when editing or scanning the shared index; this keeps background scans, thumbnails, and SQLite locking on one side of the macOS/Linux boundary. Stop the Docker server with `docker compose stop` before switching to `bun run dev`. To back up the data folder, stop the app first and include the complete folder, including any WAL file.
+
+```bash
+docker compose logs -f app                 # server logs
+docker compose stop                       # stop; all local data stays in place
+docker compose up -d --build --wait        # start again, or rebuild after code changes
+docker compose exec app bun run scan      # rescan registered folders
+docker compose exec app bun run writeback # preview pending metadata writes
+```
+
+Photos are mounted read-only, so applying `writeback` should be done with the native CLI after stopping the container. The image includes ffmpeg, ExifTool, LibRaw (RAW), and heif-convert (HEIC/HEIF). Linux decoding may differ from macOS ImageIO. Revealing files in macOS Finder requires running the app natively.
+
+`HOST=0.0.0.0` is used inside the container, with no host ports published. `PHOTOMAP_ALLOWED_HOSTS` explicitly permits `photomap.local` and the service's OrbStack domain; other custom hosts and cross-origin writes are rejected.
+
 ## Using it
 
 The header switches between two views, **Map** and **Gallery**; the app reopens in the one you used last.

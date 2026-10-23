@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatBytes,
   formatDate,
@@ -16,6 +16,7 @@ import { DatePicker, toDateInput, type DateInput } from "./DatePicker";
 import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
+import { useZoom } from "./zoom";
 
 interface PhotoDetail {
   id: number;
@@ -133,6 +134,14 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
   const [editing, setEditing] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
   const hint = useMemo(() => (editing && i != null ? nearestTagged(points, i) : null), [editing, points, i]);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const d = detail?.id === id ? detail : null;
+  const pixels = d?.kind === "photo" && d.width && d.height ? Math.max(d.width, d.height) : null;
+  const zoom = useZoom(stageRef, imgRef, pixels, !isVideo, id);
+  /** Photo id whose original has been decoded and replaces the 2048px preview. */
+  const [fullId, setFullId] = useState<number | null>(null);
+  const fullRequested = useRef<number | null>(null);
 
   useEffect(() => {
     setLoaded(false);
@@ -153,14 +162,32 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per photo, not when the list around it changes.
   }, [id]);
 
+  // Zoomed in, the preview runs out of pixels: swap in the original if the browser can show it (not RAW;
+  // HEIC only in Safari — a failed decode just keeps the preview).
+  const wantFull = zoom.zoomed && d?.kind === "photo";
+  useEffect(() => {
+    if (!wantFull || fullRequested.current === id) return;
+    fullRequested.current = id;
+    const im = new Image();
+    im.src = `/original/${id}`;
+    im.decode().then(
+      () => setFullId(id),
+      () => {},
+    );
+  }, [wantFull, id]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Typing coordinates must not flip photos or close the viewer.
       if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && zoom.zoomed) zoom.reset();
+      else if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" && index < ids.length - 1) onIndex(index + 1);
       else if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
       else if (e.key === "i") toggleInfo();
+      else if (!isVideo && (e.key === "+" || e.key === "=")) zoom.zoomBy(2);
+      else if (!isVideo && e.key === "-") zoom.zoomBy(0.5);
+      else if (!isVideo && e.key === "0") zoom.reset();
       else return;
       e.preventDefault();
     };
@@ -173,8 +200,6 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
       localStorageSet("pm.info", v ? "0" : "1");
       return !v;
     });
-
-  const d = detail?.id === id ? detail : null;
 
   const saveLocation = async (c: LatLon | null) => {
     const updated = await sendLocation(id, c);
@@ -211,7 +236,12 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
 
   return (
     <div className="viewer" role="dialog" aria-modal="true">
-      <div className="viewer-stage" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={stageRef}
+        className={`viewer-stage ${isVideo ? "" : "is-zoomable"} ${zoom.zoomed ? "is-zoomed" : ""} ${zoom.panning ? "is-panning" : ""}`}
+        onClick={(e) => e.target === e.currentTarget && !zoom.wasDrag() && onClose()}
+        {...zoom.handlers}
+      >
         {isVideo ? (
           <video
             key={id}
@@ -233,10 +263,16 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
             />
             <img
               key={`l${id}`}
-              src={`/thumbs/l/${id}`}
+              ref={imgRef}
+              src={fullId === id ? `/original/${id}` : `/thumbs/l/${id}`}
               alt={d?.name ?? ""}
-              className={`viewer-media ${loaded ? "is-loaded" : ""}`}
-              onLoad={() => setLoaded(true)}
+              className={`viewer-media ${loaded ? "is-loaded" : ""} ${zoom.animate ? "is-animating" : ""}`}
+              style={zoom.imgProps.style}
+              draggable={false}
+              onLoad={(e) => {
+                setLoaded(true);
+                zoom.imgProps.onLoad(e);
+              }}
             />
           </>
         )}

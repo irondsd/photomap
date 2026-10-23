@@ -1,7 +1,8 @@
 import sharp from "sharp";
-import { join } from "node:path";
-import { mkdir, rm } from "node:fs/promises";
+import { extname, join } from "node:path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { THUMB_DIR, CPUS } from "./config";
 import { db, type PhotoRow } from "./db";
 
@@ -98,6 +99,21 @@ async function sipsDecode(path: string, px: number, out: string): Promise<Buffer
   }
 }
 
+/** Linux replacements for ImageIO; decoded files are temporary, originals stay read-only. */
+async function linuxDecode(p: ThumbSource): Promise<Buffer | null> {
+  if (p.kind === "raw") return run(["dcraw_emu", "-Z", "-", "-T", "-w", "-q", "0", p.path]);
+  if (![".heic", ".heif"].includes(extname(p.path).toLowerCase())) return null;
+  const dir = await mkdtemp(join(tmpdir(), "photomap-heif-"));
+  try {
+    const out = join(dir, "decoded.jpg");
+    const proc = Bun.spawn(["heif-convert", p.path, out], { stdout: "ignore", stderr: "ignore" });
+    if ((await proc.exited) !== 0) return null;
+    return Buffer.from(await Bun.file(out).arrayBuffer());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 async function render(input: string | Buffer, size: ThumbSize): Promise<Buffer> {
   const { px, quality } = SPEC[size];
   let img = sharp(input, { failOn: "none", limitInputPixels: 0, animated: false }).rotate();
@@ -117,9 +133,14 @@ async function generate(p: ThumbSource, size: ThumbSize, out: string): Promise<s
     const frame = await videoFrame(p, px);
     if (frame) data = await render(frame, size);
   } else {
-    if (p.kind === "photo") data = await render(p.path, size).catch(() => null);
+    // Some exports contain JPEG data despite having a RAW extension.
+    data = await render(p.path, size).catch(() => null);
     if (!data && process.platform === "darwin") {
       const decoded = await sipsDecode(p.path, size === "l" ? px : 1200, out);
+      if (decoded) data = await render(decoded, size).catch(() => null);
+    }
+    if (!data && process.platform === "linux") {
+      const decoded = await linuxDecode(p).catch(() => null);
       if (decoded) data = await render(decoded, size).catch(() => null);
     }
   }

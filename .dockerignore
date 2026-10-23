@@ -1,0 +1,8 @@
+# Send only application sources and dependency manifests to the builder.
+**
+!Dockerfile
+!package.json
+!bun.lock
+!bunfig.toml
+!src/
+!src/**
