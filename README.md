@@ -29,7 +29,7 @@ You can also start the server with an empty index and add folders from the UI (*
 | `bun lint` / `bun lint --fix`                | Lint, optionally applying the safe fixes. It's Bun's built-in command; there's no `lint` script because one would shadow it                                                                                                                                                                                       |
 | `bun run format` / `bun run format:check`    | Format the codebase (`bun fmt`, Prettier-compatible, configured in `.prettierrc.json`), or only check it                                                                                                                                                                                                          |
 
-Environment: `PORT` (default 4747), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`).
+Environment: `PORT` (default 4747), `HOST` (default 127.0.0.1), `PHOTOMAP_DATA` (default `./data`). Phone sync: `PHOTOMAP_SYNC_DIR` (the default sync folder, `~/Pictures/Photomap Sync`), `PHOTOMAP_SYNC_PORT` (default `PORT` + 1), `PHOTOMAP_SYNC_URL` (the address phones use, when it can't be detected), `PHOTOMAP_SYNC_NAME` (shown in the app).
 
 **Requirements:** `ffmpeg`/`ffprobe` on PATH for video metadata and poster frames, and `exiftool` for `writeback` (`brew install exiftool`). The typecheck, lint and format commands need Bun 1.4.4 or newer (`bun upgrade --canary` until it's released). On macOS, HEIC and RAW files are decoded with the built-in `sips`.
 
@@ -63,7 +63,7 @@ docker compose exec app bun run writeback # preview pending metadata writes
 
 Photos are mounted read-only, so applying `writeback` should be done with the native CLI after stopping the container. The image includes ffmpeg, ExifTool, LibRaw (RAW), and heif-convert (HEIC/HEIF). Linux decoding may differ from macOS ImageIO. Revealing files in macOS Finder requires running the app natively.
 
-`HOST=0.0.0.0` is used inside the container, with no host ports published. `PHOTOMAP_ALLOWED_HOSTS` explicitly permits `photomap.local` and the service's OrbStack domain; other custom hosts and cross-origin writes are rejected.
+`HOST=0.0.0.0` is used inside the container, and the only host port published is phone sync's 4748. Since the container can't see the Mac's wifi address, set `PHOTOMAP_SYNC_URL=http://<your Mac's IP>:4748` in `.env` before turning sync on. Phone sync can write anywhere in `PHOTOMAP_SYNC_ROOT` (default `~/Pictures`), which is mounted writable; the library inside it stays read-only, so a sync folder can't be inside the library. Photomap refuses any folder outside the shared ones, so files can never end up inside the container. `PHOTOMAP_ALLOWED_HOSTS` explicitly permits `photomap.local` and the service's OrbStack domain; other custom hosts and cross-origin writes are rejected.
 
 ## Using it
 
@@ -82,6 +82,20 @@ The header switches between two views, **Map** and **Gallery**; the app reopens 
 - **Sidebar:** photos in the visible map area (newest first), plus a **No location** tab for photos without GPS. Hovering a thumbnail pings its spot on the map and its time on the timeline.
 - **Viewer:** ← → to move, **i** for info, **Esc** to close. "Show on map" flies to the photo, and "Show in Finder" reveals the file.
 - The map position and time selection live in the URL, so you can bookmark a view.
+
+## Phone sync
+
+The Android app in [`mobile/`](mobile/README.md) sends the photos and videos on your phone to Photomap over wifi, as original files with their GPS intact.
+
+1. In **Library → Phone sync**, tick **Accept phones on this network**. A pairing code appears.
+2. In the app, tap **Scan pairing code** and point it at the screen.
+3. Pick how far back to look (7 days to everything) and tap **Sync now**.
+
+The sync folder is `~/Pictures/Photomap Sync` unless you set `PHOTOMAP_SYNC_DIR`. **Change** next to it picks another one, created if needed. Files received earlier stay where they are and aren't sent again. Files can go into `<year>/<month>` folders or straight into the sync folder, to match a flat camera roll. Photos the library already has are skipped too, matched by file name and capture time (within 14 hours, since the library stores local time), so pointing sync at a camera roll you copied over before doesn't duplicate it.
+
+The phone lists its photos from that date, the server says which ones it doesn't have, and only those are sent, one at a time and streamed straight to disk. Files land in the sync folder as `<year>/<month>/<name>`, and that folder is added to the library and rescanned a few seconds after the last file arrives. The server remembers each file by name and capture time, so moving or renaming files afterwards doesn't make the phone send them again. A sync that's stopped or interrupted just picks up the rest next time.
+
+Sync runs on its own port (`PHOTOMAP_SYNC_PORT`), listening on the local network. It serves only the sync API, which requires the token from the pairing code; the rest of Photomap stays on localhost. **Unpair all phones** issues a new token. Turning sync off closes the port, and the setting is remembered across restarts.
 
 ## How it works
 
@@ -122,7 +136,7 @@ scan ──► SQLite index (bun:sqlite) ──► Bun.serve ──► React + M
 
 - **Client:** the browser downloads one compact binary array (about 30 bytes per photo) and does clustering (`supercluster`, in a Web Worker) and timeline counts locally, so filtering never waits on the server.
 - **Thumbnails:** generated by `sharp`, falling back to `sips` and `ffmpeg`. They're cached under `data/thumbs` and generated on demand plus in the background after scans.
-- **Security:** the server binds to localhost, rejects foreign `Host` headers and cross-site writes, and only serves files that are in the index.
+- **Security:** the server binds to localhost, rejects foreign `Host` headers and cross-site writes, and only serves files that are in the index. Phone sync, when on, is a separate listener that only accepts uploads carrying the pairing token.
 
 Map tiles come from [OpenFreeMap](https://openfreemap.org) (OpenStreetMap data). They are the only network requests the app makes.
 

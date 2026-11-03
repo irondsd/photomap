@@ -26,5 +26,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  // mobile/ is a React Native project with its own tsconfig.
+  "exclude": ["mobile", "node_modules"]
 }

@@ -1,3 +1,5 @@
 [test]
+# mobile/ is its own project with its own tests.
+root = "src"
 # Tests never open the real index in data/.
 preload = ["./src/test-setup.ts"]

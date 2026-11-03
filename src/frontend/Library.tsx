@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatDate, nf } from "./data";
+import { SyncSection } from "./Sync";
 
 export interface Stats {
   total: number;
@@ -216,6 +217,8 @@ export function Library({
             </p>
           )}
         </section>
+
+        <SyncSection onReceived={onChanged} />
 
         {stats && stats.total > 0 && (
           <section>

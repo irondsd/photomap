@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { availableParallelism, homedir } from "node:os";
 
 export const DATA_DIR = resolve(process.env.PHOTOMAP_DATA ?? join(import.meta.dir, "..", "data"));
 export const DB_PATH = join(DATA_DIR, "index.sqlite");
@@ -8,6 +8,16 @@ export const THUMB_DIR = join(DATA_DIR, "thumbs");
 
 export const PORT = Number(process.env.PORT ?? 4747);
 export const HOST = process.env.HOST ?? "127.0.0.1";
+
+/** Phone sync listens on the local network on its own port, serving only the token-protected sync API. */
+export const SYNC_PORT = Number(process.env.PHOTOMAP_SYNC_PORT ?? PORT + 1);
+/**
+ * Where files from the phone app are written, as <year>/<month>/<name>, until another folder is
+ * chosen in the Library. Indexed like any other folder.
+ */
+export const DEFAULT_SYNC_DIR = resolve(
+  process.env.PHOTOMAP_SYNC_DIR ?? join(process.env.PHOTOMAP_HOME ?? homedir(), "Pictures", "Photomap Sync"),
+);
 
 export const CPUS = availableParallelism();
 

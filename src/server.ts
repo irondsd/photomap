@@ -8,6 +8,8 @@ import { isManualDate, parseManualDate, resetManualDates, setManualDate } from "
 import { scanRoot, cancelScan, status as scanStatus } from "./scan/scanner";
 import { getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from "./thumbs";
 import { forbidden } from "./security";
+import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
+import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
 /** Bumped whenever the index changes so the client knows to refetch points. */
 let dataVersion = Date.now();
@@ -138,6 +140,15 @@ async function runScans(targets: ScanTarget[]) {
   }
   // Background thumbnails at half capacity, leaving room for on-demand requests.
   if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));
+}
+
+/** Indexes what the phone just sent: the sync folder becomes a library folder on first use. */
+function scanSynced() {
+  try {
+    void runScans([registerTarget(syncDir())]);
+  } catch (err) {
+    console.error("Couldn't scan the sync folder:", (err as Error).message);
+  }
 }
 
 // ---------------------------------------------------------------- files
@@ -411,6 +422,45 @@ const server = Bun.serve({
       }),
     },
 
+    // Phone sync: the pairing code and the switch. The phone itself talks to the sync listener.
+    "/api/sync": {
+      GET: guard(() => json(syncStatus())),
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { enabled?: unknown } | null;
+        if (typeof body?.enabled !== "boolean") return bad("enabled must be true or false");
+        if (body.enabled) startSync(scanSynced);
+        else stopSync();
+        return json(syncStatus());
+      }),
+    },
+
+    // Where synced files go from now on. Files already received stay where they are.
+    "/api/sync/folder": {
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { path?: unknown; layout?: unknown } | null;
+        if (body?.layout !== undefined) {
+          if (body.layout !== "month" && body.layout !== "flat") return bad("layout must be month or flat");
+          setSyncLayout(body.layout);
+        }
+        if (body?.path === null) resetSyncDir();
+        else if (typeof body?.path === "string" && body.path.trim()) {
+          try {
+            setSyncDir(body.path);
+          } catch (err) {
+            return bad((err as Error).message);
+          }
+        } else if (body?.path !== undefined || body?.layout === undefined) return bad("path or layout required");
+        return json(syncStatus());
+      }),
+    },
+
+    "/api/sync/reset": {
+      POST: guard(() => {
+        resetToken();
+        return json(syncStatus());
+      }),
+    },
+
     "/api/reveal/:id": {
       POST: guard((req) => {
         const id = idParam(req.params.id);
@@ -483,6 +533,8 @@ const server = Bun.serve({
 
 const publicHost = process.env.PHOTOMAP_ALLOWED_HOSTS?.split(",")[0]?.trim() || `photomap.localhost:${server.port}`;
 console.log(`Photomap running at http://${publicHost}`);
+
+resumeSync(scanSynced);
 
 // Catch up on thumbnails a previous run (or a CLI scan) didn't generate.
 if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));

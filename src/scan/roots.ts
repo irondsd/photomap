@@ -8,7 +8,8 @@ export interface ScanTarget {
   subdir: string | null;
 }
 
-export const expandHome = (p: string) => p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~");
+/** In Docker, PHOTOMAP_HOME is the computer's home folder, so ~ means the same as outside it. */
+export const expandHome = (p: string) => p.replace(/^~(?=$|\/)/, process.env.PHOTOMAP_HOME ?? process.env.HOME ?? "~");
 
 export function normalizeFolder(input: string): string {
   let path: string;

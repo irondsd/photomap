@@ -48,7 +48,7 @@ export interface RootRow {
   last_scan_at: number | null;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 
 export const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
@@ -95,6 +95,31 @@ if (version < 1) {
     db.run(`CREATE INDEX photos_taken ON photos(taken_local)`);
     db.run(`CREATE INDEX photos_root ON photos(root_id, scan_gen)`);
     db.run(`CREATE INDEX photos_geo ON photos(lat, lon)`);
+    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '1')`);
+  })();
+}
+
+if (version < 2) {
+  db.transaction(() => {
+    // Files received from the phone app. A phone file is known by its name and capture time,
+    // so it isn't sent again even if it was moved or renamed here afterwards.
+    db.run(`CREATE TABLE synced_files (
+      filename TEXT NOT NULL,
+      taken_at INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      synced_at INTEGER NOT NULL,
+      PRIMARY KEY (filename, taken_at)
+    )`);
+    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '2')`);
+  })();
+}
+
+if (version < 3) {
+  db.transaction(() => {
+    // Phone sync looks files up by name, to skip ones already in the library.
+    db.run(`CREATE INDEX photos_name ON photos(name)`);
     db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '${SCHEMA_VERSION}')`);
   })();
 }

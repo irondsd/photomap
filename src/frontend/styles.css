@@ -898,6 +898,51 @@ h4 {
   margin: 0;
   text-align: right;
 }
+.sync-toggle {
+  cursor: pointer;
+}
+.sync-folder-box {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.sync-folder-box .row {
+  flex-wrap: nowrap;
+}
+.sync-folder {
+  flex: 1;
+}
+.sync-folder-box > .btn-ghost,
+.sync-folder-box > .segmented {
+  justify-self: start;
+}
+.sync-pair {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.sync-pair p + p {
+  margin-top: 6px;
+}
+/* Always dark on light, whatever the theme, so phone cameras read it. */
+.sync-qr {
+  background: #fff;
+  border-radius: var(--radius);
+  padding: 6px;
+  line-height: 0;
+}
+.sync-qr svg {
+  width: 100%;
+  height: auto;
+}
+@media (max-width: 420px) {
+  .sync-pair {
+    grid-template-columns: 1fr;
+  }
+}
 .stats-row {
   display: contents;
 }
