@@ -10,8 +10,13 @@ import {
   localStorageSet,
   nearestTagged,
   nf,
+  bumpThumb,
+  thumbStamp,
+  thumbUrl,
   type Points,
 } from "./data";
+import { Editor, type EditResult } from "./Editor";
+import { editedSize, type Edits } from "../edits/model";
 import { DatePicker, toDateInput, type DateInput } from "./DatePicker";
 import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
@@ -42,6 +47,10 @@ interface PhotoDetail {
   exposure: number | null;
   focal: number | null;
   country: string | null;
+  /** Saved in Photomap; the file itself is unchanged. */
+  edits: Edits | null;
+  /** The edits can be written into the file (JPEG, PNG, WebP, TIFF). */
+  writable: boolean;
 }
 
 interface ViewerProps {
@@ -54,8 +63,15 @@ interface ViewerProps {
   onIndex(i: number): void;
   onClose(): void;
   onShowOnMap(i: number): void;
-  /** The photo's location or date was changed; the caller should reload the index. */
+  /** The photo's location, date or edits were changed; the caller should reload the index. */
   onLocationChange(): void;
+}
+
+async function sendEdits(url: string, method: string): Promise<PhotoDetail> {
+  const r = await fetch(url, { method });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "Something went wrong");
+  return j;
 }
 
 const GPS_SOURCE_NOTE: Record<string, string> = {
@@ -133,20 +149,30 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
   const [showInfo, setShowInfo] = useState(() => localStorageGet("pm.info") !== "0");
   const [editing, setEditing] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
+  /** The photo editor is open. */
+  const [editingPhoto, setEditingPhoto] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
   const hint = useMemo(() => (editing && i != null ? nearestTagged(points, i) : null), [editing, points, i]);
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const d = detail?.id === id ? detail : null;
-  const pixels = d?.kind === "photo" && d.width && d.height ? Math.max(d.width, d.height) : null;
+  const shown = d?.width && d.height ? (d.edits ? editedSize(d.width, d.height, d.edits) : [d.width, d.height]) : null;
+  const pixels = d?.kind === "photo" && shown ? Math.max(...shown) : null;
+  const stamp = thumbStamp(id);
   const zoom = useZoom(stageRef, imgRef, pixels, !isVideo, id);
   /** Photo id whose original has been decoded and replaces the 2048px preview. */
   const [fullId, setFullId] = useState<number | null>(null);
-  const fullRequested = useRef<number | null>(null);
+  const fullRequested = useRef<string | null>(null);
 
   useEffect(() => {
     setLoaded(false);
     setEditing(false);
     setEditingDate(false);
+    setEditingPhoto(false);
+    setMenu(false);
+    setNotice(null);
     const ac = new AbortController();
     fetch(`/api/photos/${id}`, { signal: ac.signal })
       .then((r) => r.json())
@@ -156,7 +182,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     for (const k of [index + 1, index - 1]) {
       const nid = ids[k];
       const j = nid != null ? indexOf(nid) : undefined;
-      if (j != null && points.kind[j] !== 2) new Image().src = `/thumbs/l/${nid}`;
+      if (j != null && points.kind[j] !== 2) new Image().src = thumbUrl(nid!, "l");
     }
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per photo, not when the list around it changes.
@@ -164,27 +190,33 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
 
   // Zoomed in, the preview runs out of pixels: swap in the original if the browser can show it (not RAW;
   // HEIC only in Safari — a failed decode just keeps the preview).
+  // An edited photo zooms into a full-size render of its edits instead.
   const wantFull = zoom.zoomed && d?.kind === "photo";
+  const fullSrc = d?.edits ? `/edited/${id}?v=${stamp}` : `/original/${id}`;
   useEffect(() => {
-    if (!wantFull || fullRequested.current === id) return;
-    fullRequested.current = id;
+    if (!wantFull || fullRequested.current === fullSrc) return;
+    fullRequested.current = fullSrc;
     const im = new Image();
-    im.src = `/original/${id}`;
+    im.src = fullSrc;
     im.decode().then(
       () => setFullId(id),
       () => {},
     );
-  }, [wantFull, id]);
+  }, [wantFull, id, fullSrc]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The editor has keys of its own.
+      if (editingPhoto) return;
       // Typing coordinates must not flip photos or close the viewer.
       if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
-      if (e.key === "Escape" && zoom.zoomed) zoom.reset();
+      if (e.key === "Escape" && menu) setMenu(false);
+      else if (e.key === "Escape" && zoom.zoomed) zoom.reset();
       else if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" && index < ids.length - 1) onIndex(index + 1);
       else if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
       else if (e.key === "i") toggleInfo();
+      else if (e.key === "e" && d && !isVideo) setEditingPhoto(true);
       else if (!isVideo && (e.key === "+" || e.key === "=")) zoom.zoomBy(2);
       else if (!isVideo && e.key === "-") zoom.zoomBy(0.5);
       else if (!isVideo && e.key === "0") zoom.reset();
@@ -225,6 +257,70 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     );
     if (ok) saveDate(null).catch((err) => alert(err.message));
   };
+  // The menu closes on a click anywhere else.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => {
+      if (!(e.target as Element).closest?.(".menu-wrap")) setMenu(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [menu]);
+
+  /** The edits changed: images on the page load again, and the index (aspect ratios) too. */
+  const editsChanged = (updated: PhotoDetail | null) => {
+    if (updated) setDetail(updated);
+    bumpThumb(id);
+    setFullId(null);
+    fullRequested.current = null;
+    zoom.reset();
+    onLocationChange();
+  };
+  const finishEditing = (r: EditResult) => {
+    setEditingPhoto(false);
+    if (!r) return;
+    if (r.kind === "saved") {
+      editsChanged(r.detail as PhotoDetail);
+      setNotice("Edits saved. The original file is unchanged.");
+    } else {
+      onLocationChange();
+      setNotice(`Saved a copy as ${r.name}.`);
+    }
+  };
+  const revertEdits = async () => {
+    setMenu(false);
+    if (!confirm("Revert to the original?\n\nYour edits to this photo are removed. The file was never changed."))
+      return;
+    setWorking(true);
+    try {
+      editsChanged(await sendEdits(`/api/photos/${id}/edits`, "DELETE"));
+      setNotice("Reverted to the original.");
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  };
+  const writeEdits = async () => {
+    setMenu(false);
+    if (
+      !d ||
+      !confirm(
+        `Write the edits into ${d.name}?\n\nThe file is replaced with the edited version and its original pixels are gone for good. This can't be undone.`,
+      )
+    )
+      return;
+    setWorking(true);
+    try {
+      editsChanged(await sendEdits(`/api/photos/${id}/edits/apply`, "POST"));
+      setNotice(`Edits written into ${d.name}.`);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const settings =
     d &&
     [
@@ -246,7 +342,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
           <video
             key={id}
             src={`/original/${id}`}
-            poster={`/thumbs/l/${id}`}
+            poster={thumbUrl(id, "l")}
             controls
             autoPlay
             playsInline
@@ -256,7 +352,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
           <>
             <img
               key={`s${id}`}
-              src={`/thumbs/s/${id}`}
+              src={thumbUrl(id, "s")}
               alt=""
               className="viewer-media viewer-placeholder"
               aria-hidden
@@ -264,7 +360,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
             <img
               key={`l${id}`}
               ref={imgRef}
-              src={fullId === id ? `/original/${id}` : `/thumbs/l/${id}`}
+              src={fullId === id ? fullSrc : thumbUrl(id, "l")}
               alt={d?.name ?? ""}
               className={`viewer-media ${loaded ? "is-loaded" : ""} ${zoom.animate ? "is-animating" : ""}`}
               style={zoom.imgProps.style}
@@ -281,6 +377,50 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
             {nf.format(index + 1)} / {nf.format(ids.length)}
           </span>
           <div className="viewer-top-actions">
+            {d && d.kind !== "video" && (
+              <button
+                className="btn btn-overlay"
+                onClick={() => setEditingPhoto(true)}
+                disabled={working}
+                title="Edit (e)"
+              >
+                Edit
+              </button>
+            )}
+            {d?.edits && (
+              <div className="menu-wrap">
+                <button
+                  className="btn btn-overlay"
+                  onClick={() => setMenu((m) => !m)}
+                  aria-haspopup="menu"
+                  aria-expanded={menu}
+                  aria-label="More"
+                  title="More"
+                  disabled={working}
+                >
+                  {working ? "…" : "⋯"}
+                </button>
+                {menu && (
+                  <div className="menu" role="menu">
+                    <button role="menuitem" onClick={revertEdits}>
+                      Revert to original
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={writeEdits}
+                      disabled={!d.writable}
+                      title={
+                        d.writable
+                          ? undefined
+                          : "Only JPEG, PNG, WebP and TIFF files can be rewritten. Save a copy instead."
+                      }
+                    >
+                      Write edits into file…
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <button className="btn btn-overlay" onClick={toggleInfo} title="Info (i)">
               Info
             </button>
@@ -289,6 +429,11 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
             </button>
           </div>
         </div>
+        {notice && (
+          <div className="viewer-notice" role="status" onAnimationEnd={() => setNotice(null)} key={notice}>
+            {notice}
+          </div>
+        )}
         {index > 0 && (
           <button className="viewer-nav viewer-prev" onClick={() => onIndex(index - 1)} aria-label="Previous">
             ‹
@@ -421,6 +566,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
               <section>
                 <h4>File</h4>
                 <div className="break">{d.name}</div>
+                {d.edits && <div className="note">Edited in Photomap — the file itself is unchanged</div>}
                 <div className="dim">
                   {[
                     d.width && d.height && `${d.width} × ${d.height}`,
@@ -436,7 +582,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                     Show in Finder
                   </button>
                   <a className="btn btn-small" href={`/original/${id}`} target="_blank" rel="noreferrer">
-                    Open original
+                    {d.edits ? "Open original file" : "Open original"}
                   </a>
                 </div>
               </section>
@@ -444,6 +590,8 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
           )}
         </aside>
       )}
+      {/* Over the viewer rather than instead of it: the stage keeps its listeners. */}
+      {editingPhoto && d && <Editor photo={{ id, name: d.name, edits: d.edits }} onDone={finishEditing} />}
     </div>
   );
 }

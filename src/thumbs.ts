@@ -1,27 +1,37 @@
-import sharp from "sharp";
+import sharp, { type Sharp } from "sharp";
 import { extname, join } from "node:path";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { THUMB_DIR, CPUS } from "./config";
 import { db, type PhotoRow } from "./db";
+import { parseEdits, type Edits } from "./edits/model";
+import { fromRaw, renderEdits } from "./edits/render";
 
 export type ThumbSize = "s" | "m" | "l";
 export const THUMB_SIZES: readonly ThumbSize[] = ["s", "m", "l"];
 
-const SPEC: Record<ThumbSize, { px: number; quality: number }> = {
+/** "f" is the full-size render of an edited photo, for zooming in. */
+export type RenderSize = ThumbSize | "f";
+
+const SPEC: Record<RenderSize, { px: number; quality: number }> = {
   s: { px: 320, quality: 74 }, // square crop: sidebar grid and map markers
   m: { px: 400, quality: 76 }, // 400 px tall, uncropped: gallery rows (2× for ~200 px rows)
   l: { px: 2048, quality: 84 }, // fit inside: viewer
+  f: { px: 0, quality: 90 },
 };
 
 sharp.cache(false);
 
-type ThumbSource = Pick<PhotoRow, "id" | "path" | "mtime" | "kind" | "duration">;
+/** `edits` null or absent: the photo as it is in the file. */
+export type ThumbSource = Pick<PhotoRow, "id" | "path" | "mtime" | "kind" | "duration"> & { edits?: string | null };
 
-const cacheKey = (p: ThumbSource) => Bun.hash(`${p.path}\0${p.mtime}`).toString(16).padStart(16, "0");
+const cacheKey = (p: ThumbSource) =>
+  Bun.hash(`${p.path}\0${p.mtime}${p.edits ? `\0${p.edits}` : ""}`)
+    .toString(16)
+    .padStart(16, "0");
 
-function cacheFile(p: ThumbSource, size: ThumbSize): string {
+function cacheFile(p: ThumbSource, size: RenderSize): string {
   const key = cacheKey(p);
   return join(THUMB_DIR, size, key.slice(0, 2), `${key}.jpg`);
 }
@@ -31,9 +41,9 @@ function cacheFile(p: ThumbSource, size: ThumbSize): string {
  * index, a removed and re-added folder), so browsers must revalidate against this
  * rather than cache by URL.
  */
-export const thumbETag = (p: ThumbSource, size: ThumbSize) => `"${size}${cacheKey(p)}"`;
+export const thumbETag = (p: ThumbSource, size: RenderSize) => `"${size}${cacheKey(p)}"`;
 
-export const hasThumb = (p: ThumbSource, size: ThumbSize) => existsSync(cacheFile(p, size));
+export const hasThumb = (p: ThumbSource, size: RenderSize) => existsSync(cacheFile(p, size));
 
 class Limiter {
   private active = 0;
@@ -83,10 +93,11 @@ async function videoFrame(p: ThumbSource, px: number): Promise<Buffer | null> {
 }
 
 /** macOS ImageIO decodes HEIC and most RAW formats that libvips can't. It keeps the orientation tag. */
-async function sipsDecode(path: string, px: number, out: string): Promise<Buffer | null> {
+async function sipsDecode(path: string, px: number | null, out: string): Promise<Buffer | null> {
   const tmp = `${out}.${process.pid}.${Math.random().toString(36).slice(2)}.sips.jpg`;
   try {
-    const proc = Bun.spawn(["sips", "-s", "format", "jpeg", "-Z", String(px), path, "--out", tmp], {
+    const size = px ? ["-Z", String(px)] : [];
+    const proc = Bun.spawn(["sips", "-s", "format", "jpeg", ...size, path, "--out", tmp], {
       stdout: "ignore",
       stderr: "ignore",
     });
@@ -114,9 +125,14 @@ async function linuxDecode(p: ThumbSource): Promise<Buffer | null> {
   }
 }
 
-async function render(input: string | Buffer, size: ThumbSize): Promise<Buffer> {
+async function render(input: string | Buffer, size: RenderSize, edits: Edits | null): Promise<Buffer> {
   const { px, quality } = SPEC[size];
-  let img = sharp(input, { failOn: "none", limitInputPixels: 0, animated: false }).rotate();
+  let img: Sharp;
+  if (edits) {
+    // Edited at a size that still covers this thumbnail; the tweaks don't depend on it.
+    img = fromRaw(await renderEdits(input, edits, size === "f" ? null : size === "l" ? px : 1200)).removeAlpha();
+    if (size === "f") return img.jpeg({ quality, mozjpeg: false }).toBuffer();
+  } else img = sharp(input, { failOn: "none", limitInputPixels: 0, animated: false }).rotate();
   img =
     size === "s"
       ? img.resize(px, px, { fit: "cover", position: "attention" })
@@ -126,32 +142,47 @@ async function render(input: string | Buffer, size: ThumbSize): Promise<Buffer> 
   return img.jpeg({ quality, mozjpeg: false }).toBuffer();
 }
 
-async function generate(p: ThumbSource, size: ThumbSize, out: string): Promise<string | null> {
+/**
+ * Decodes HEIC and RAW with the system's decoder, for when libvips can't: a JPEG no larger
+ * than `px` on its long side (null: full size). `scratch` names the temporary file.
+ */
+export async function systemDecode(p: ThumbSource, px: number | null, scratch: string): Promise<Buffer | null> {
+  if (process.platform === "darwin") return sipsDecode(p.path, px, scratch);
+  if (process.platform === "linux") return linuxDecode(p).catch(() => null);
+  return null;
+}
+
+async function generate(p: ThumbSource, size: RenderSize, out: string): Promise<string | null> {
   const { px } = SPEC[size];
+  const edits = p.kind === "video" ? null : parseEdits(p.edits ?? null);
+  // Before decoding: sips writes its temporary file next to `out`.
+  await mkdir(join(out, ".."), { recursive: true });
   let data: Buffer | null = null;
   if (p.kind === "video") {
     const frame = await videoFrame(p, px);
-    if (frame) data = await render(frame, size);
+    if (frame) data = await render(frame, size, null);
   } else {
     // Some exports contain JPEG data despite having a RAW extension.
-    data = await render(p.path, size).catch(() => null);
+    data = await render(p.path, size, edits).catch(() => null);
     if (!data && process.platform === "darwin") {
-      const decoded = await sipsDecode(p.path, size === "l" ? px : 1200, out);
-      if (decoded) data = await render(decoded, size).catch(() => null);
+      const decoded = await sipsDecode(p.path, size === "f" ? null : size === "l" ? px : 1200, out);
+      if (decoded) data = await render(decoded, size, edits).catch(() => null);
     }
     if (!data && process.platform === "linux") {
       const decoded = await linuxDecode(p).catch(() => null);
-      if (decoded) data = await render(decoded, size).catch(() => null);
+      if (decoded) data = await render(decoded, size, edits).catch(() => null);
     }
   }
   if (!data) return null;
-  await mkdir(join(out, ".."), { recursive: true });
   await Bun.write(out, data);
   return out;
 }
 
-/** Returns a cached thumbnail path, generating it if needed. null when the file can't be decoded. */
-export function getThumb(p: ThumbSource, size: ThumbSize): Promise<string | null> {
+/**
+ * Returns a cached thumbnail path, generating it if needed. null when the file can't be decoded.
+ * Size "f" is the full-size render of an edited photo.
+ */
+export function getThumb(p: ThumbSource, size: RenderSize): Promise<string | null> {
   const out = cacheFile(p, size);
   if (existsSync(out)) return Promise.resolve(out);
   let job = inflight.get(out);
@@ -182,7 +213,7 @@ export async function pregenerateThumbs(
     const jobs: [ThumbSource, ThumbSize][] = [];
     for (const r of db
       .query<ThumbSource, []>(
-        `SELECT id, path, mtime, kind, duration FROM photos WHERE missing = 0 ORDER BY taken_local DESC`,
+        `SELECT id, path, mtime, kind, duration, edits FROM photos WHERE missing = 0 ORDER BY taken_local DESC`,
       )
       .all()) {
       for (const size of ["s", "m"] as const) if (!existsSync(cacheFile(r, size))) jobs.push([r, size]);

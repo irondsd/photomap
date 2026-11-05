@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { nf, PRECISION, type Points } from "./data";
+import { nf, PRECISION, thumbUrl, type Points } from "./data";
 import { DatePicker, type DateInput } from "./DatePicker";
 
 const STRIP = 12;
@@ -71,7 +71,7 @@ export function BulkDateDialog({ points, ids, indexOf, onClose, onDone }: BulkDa
         </header>
         <div className="bulk-strip">
           {indices.slice(0, STRIP).map((i) => (
-            <img key={i} src={`/thumbs/s/${points.id[i]}`} alt="" />
+            <img key={i} src={thumbUrl(points.id[i]!, "s")} alt="" />
           ))}
           {indices.length > STRIP && <span className="bulk-more">+{nf.format(indices.length - STRIP)}</span>}
         </div>

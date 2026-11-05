@@ -37,9 +37,11 @@ export interface PhotoRow {
   country: string | null;
   error: string | null;
   indexed_at: number;
+  /** Edits made in Photomap (JSON, see edits/model.ts); the file itself is untouched. Rescans keep them. */
+  edits: string | null;
 }
 
-export type PhotoInsert = Omit<PhotoRow, "id" | "missing" | "indexed_at">;
+export type PhotoInsert = Omit<PhotoRow, "id" | "missing" | "indexed_at" | "edits">;
 
 export interface RootRow {
   id: number;
@@ -48,7 +50,7 @@ export interface RootRow {
   last_scan_at: number | null;
 }
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
@@ -120,6 +122,13 @@ if (version < 3) {
   db.transaction(() => {
     // Phone sync looks files up by name, to skip ones already in the library.
     db.run(`CREATE INDEX photos_name ON photos(name)`);
+    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '3')`);
+  })();
+}
+
+if (version < 4) {
+  db.transaction(() => {
+    db.run(`ALTER TABLE photos ADD COLUMN edits TEXT`);
     db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '${SCHEMA_VERSION}')`);
   })();
 }
@@ -237,6 +246,10 @@ export const setRootScanned = (id: number) =>
   db.run(`UPDATE roots SET last_scan_at = ? WHERE id = ?`, [Date.now(), id]);
 
 export const getPhoto = (id: number) => db.query<PhotoRow, [number]>(`SELECT * FROM photos WHERE id = ?`).get(id);
+
+/** Stores (or with null, clears) a photo's edits. */
+export const setEdits = (id: number, edits: string | null) =>
+  db.run(`UPDATE photos SET edits = ? WHERE id = ?`, [edits, id]);
 
 /** Compact columns used to build the client-side index. */
 export function allPoints() {

@@ -1,7 +1,20 @@
 import { join } from "node:path";
 import index from "./frontend/index.html";
 import { HOST, PORT, CPUS } from "./config";
-import { db, getPhoto, getRoot, getRoots, removeRoot, stats, cameraName, type RootRow } from "./db";
+import {
+  db,
+  getPhoto,
+  getRoot,
+  getRoots,
+  removeRoot,
+  setEdits,
+  stats,
+  cameraName,
+  type PhotoRow,
+  type RootRow,
+} from "./db";
+import { editedSize, frameSize, isIdentity, parseEdits, serialize } from "./edits/model";
+import { canWriteInto, saveCopy, writeIntoFile } from "./edits/files";
 import { registerTarget, type ScanTarget } from "./scan/roots";
 import { restoreFromFile, setLocation } from "./scan/locate";
 import { isManualDate, parseManualDate, resetManualDates, setManualDate } from "./scan/manualDates";
@@ -25,6 +38,20 @@ function guard<R extends Request>(h: Handler<R>): Handler<R> {
 }
 
 const json = (data: unknown, init?: ResponseInit) => Response.json(data, init);
+
+/** What the viewer shows about one photo. */
+const detail = (p: PhotoRow) =>
+  json({ ...p, camera: cameraName(p.make, p.model), edits: parseEdits(p.edits), writable: canWriteInto(p) });
+
+/** Submitted edits for photo p, fitted to its shape; null to clear them. undefined when malformed. */
+function editsFor(p: PhotoRow, raw: unknown) {
+  if (raw === null) return null;
+  const e = parseEdits(raw);
+  if (!e) return undefined;
+  const [fw, fh] = p.width && p.height ? frameSize(p.width, p.height, e.quarter) : [0, 0];
+  const fitted = fw && fh ? parseEdits(e, fw / fh)! : e;
+  return isIdentity(fitted) ? null : fitted;
+}
 const bad = (message: string, status = 400) => json({ error: message }, { status });
 
 // ---------------------------------------------------------------- points
@@ -67,10 +94,11 @@ function encodePoints(): ArrayBuffer {
         country: string | null;
         gps: string | null;
         ts: string | null;
+        edits: string | null;
       },
       []
     >(
-      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps, time_source ts FROM photos WHERE missing = 0
+      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps, time_source ts, edits FROM photos WHERE missing = 0
        ORDER BY taken_local IS NULL, taken_local, id`,
     )
     .all();
@@ -109,7 +137,9 @@ function encodePoints(): ArrayBuffer {
     t[i] = r.t ?? NaN;
     lat[i] = r.lat ?? NaN;
     lon[i] = r.lon ?? NaN;
-    aspect[i] = r.w && r.h ? r.w / r.h : NaN;
+    const e = r.edits ? parseEdits(r.edits) : null;
+    const [w, h] = r.w && r.h && e ? editedSize(r.w, r.h, e) : [r.w, r.h];
+    aspect[i] = w && h ? w / h : NaN;
     id[i] = r.id;
     country[i] = r.country ? countryIndex.get(r.country)! : 0;
     kind[i] = KIND_CODE[r.kind] ?? 0;
@@ -249,7 +279,73 @@ const server = Bun.serve({
         const id = idParam(req.params.id);
         const p = id && getPhoto(id);
         if (!p) return bad("not found", 404);
-        return json({ ...p, camera: cameraName(p.make, p.model) });
+        return detail(p);
+      }),
+    },
+
+    // Edits made in the viewer. Kept in the index; the file is only changed by /apply.
+    "/api/photos/:id/edits": {
+      PUT: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p) return bad("not found", 404);
+        if (p.kind === "video") return bad("Videos can't be edited");
+        const body = (await req.json().catch(() => null)) as { edits?: unknown } | null;
+        const e = editsFor(p, body?.edits ?? null);
+        if (e === undefined) return bad("edits are malformed");
+        setEdits(p.id, e && serialize(e));
+        dataVersion = Date.now();
+        return detail(getPhoto(p.id)!);
+      }),
+      // Back to the photo as it is in the file.
+      DELETE: guard((req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p) return bad("not found", 404);
+        setEdits(p.id, null);
+        dataVersion = Date.now();
+        return detail(getPhoto(p.id)!);
+      }),
+    },
+
+    // A new file next to the original with these edits applied; the original keeps its own.
+    "/api/photos/:id/edits/copy": {
+      POST: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p) return bad("not found", 404);
+        if (p.kind === "video") return bad("Videos can't be edited");
+        if (p.missing) return bad("The file is no longer on disk", 409);
+        const body = (await req.json().catch(() => null)) as { edits?: unknown } | null;
+        const e = editsFor(p, body?.edits ?? null);
+        if (!e) return bad(e === null ? "There are no edits to save" : "edits are malformed");
+        try {
+          const copy = await saveCopy(p, e);
+          dataVersion = Date.now();
+          return json(copy);
+        } catch (err) {
+          return bad(`Couldn't save the copy: ${(err as Error).message}`, 500);
+        }
+      }),
+    },
+
+    // Writes the saved edits into the file for good.
+    "/api/photos/:id/edits/apply": {
+      POST: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p) return bad("not found", 404);
+        if (p.missing) return bad("The file is no longer on disk", 409);
+        const e = parseEdits(p.edits);
+        if (!e) return bad("This photo has no saved edits", 409);
+        if (!canWriteInto(p)) return bad(`.${p.ext} files can't be rewritten; save a copy instead`, 409);
+        try {
+          await writeIntoFile(p, e);
+        } catch (err) {
+          return bad(`Couldn't write the file: ${(err as Error).message}`, 500);
+        }
+        dataVersion = Date.now();
+        return detail(getPhoto(p.id)!);
       }),
     },
 
@@ -268,8 +364,7 @@ const server = Bun.serve({
         }
         setLocation(p.id, { lat, lon, source: "manual" });
         dataVersion = Date.now();
-        const updated = getPhoto(p.id)!;
-        return json({ ...updated, camera: cameraName(updated.make, updated.model) });
+        return detail(getPhoto(p.id)!);
       }),
       // Undo a hand-set location: back to whatever the file says (its own GPS, or none).
       DELETE: guard(async (req) => {
@@ -280,8 +375,7 @@ const server = Bun.serve({
         if (p.missing) return bad("The file is no longer on disk", 409);
         await restoreFromFile(p.id);
         dataVersion = Date.now();
-        const updated = getPhoto(p.id)!;
-        return json({ ...updated, camera: cameraName(updated.make, updated.model) });
+        return detail(getPhoto(p.id)!);
       }),
     },
 
@@ -337,8 +431,7 @@ const server = Bun.serve({
         if (!d) return bad("date must be YYYY-MM-DD, and time HH:MM if given");
         setManualDate(p.id, d);
         dataVersion = Date.now();
-        const updated = getPhoto(p.id)!;
-        return json({ ...updated, camera: cameraName(updated.make, updated.model) });
+        return detail(getPhoto(p.id)!);
       }),
       // Undo: back to the date from the file, or inferred from the files around it.
       DELETE: guard(async (req) => {
@@ -349,8 +442,7 @@ const server = Bun.serve({
         if (p.missing) return bad("The file is no longer on disk", 409);
         await resetManualDates([p.id]);
         dataVersion = Date.now();
-        const updated = getPhoto(p.id)!;
-        return json({ ...updated, camera: cameraName(updated.make, updated.model) });
+        return detail(getPhoto(p.id)!);
       }),
     },
 
@@ -483,8 +575,10 @@ const server = Bun.serve({
         const size = req.params.size as ThumbSize;
         const id = idParam(req.params.id);
         if (!THUMB_SIZES.includes(size) || !id) return bad("bad request");
-        const p = getPhoto(id);
-        if (!p) return bad("not found", 404);
+        const photo = getPhoto(id);
+        if (!photo) return bad("not found", 404);
+        // ?original: as in the file, without the edits (what the editor starts from).
+        const p = new URL(req.url).searchParams.has("original") ? { ...photo, edits: null } : photo;
         // Revalidated on every use: a 304 costs nothing locally, and ids aren't stable forever.
         const headers = { etag: thumbETag(p, size), "cache-control": "private, no-cache" };
         if (req.headers.get("if-none-match") === headers.etag && hasThumb(p, size)) {
@@ -505,6 +599,23 @@ const server = Bun.serve({
         const res = serveFile(p.path, p.ext, req);
         res.headers.set("cache-control", "private, no-cache");
         return res;
+      }),
+    },
+
+    // Full size with the saved edits, for zooming into an edited photo.
+    "/edited/:id": {
+      GET: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p || p.missing) return bad("not found", 404);
+        if (!p.edits) return Response.redirect(`/original/${p.id}`, 302);
+        const headers = { etag: thumbETag(p, "f"), "cache-control": "private, no-cache" };
+        if (req.headers.get("if-none-match") === headers.etag && hasThumb(p, "f")) {
+          return new Response(null, { status: 304, headers });
+        }
+        const file = await getThumb(p, "f");
+        if (!file) return new Response("cannot decode", { status: 415 });
+        return new Response(Bun.file(file), { headers: { ...headers, "content-type": "image/jpeg" } });
       }),
     },
 

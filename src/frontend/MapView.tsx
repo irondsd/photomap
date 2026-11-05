@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Map as MlMap, Marker, NavigationControl, ScaleControl, type LngLatBoundsLike } from "maplibre-gl";
 import type { BBox, Points } from "./data";
 import type { Cluster } from "./clusterClient";
-import { nf } from "./data";
+import { nf, thumbUrl } from "./data";
 import { setMapTheme } from "./map";
 
 export interface MapViewProps {
@@ -143,7 +143,7 @@ export function MapView(props: MapViewProps) {
       entry.el.style.setProperty("--size", `${size}px`);
       entry.el.style.zIndex = String(Math.min(9999, c.count));
       const img = entry.el.firstChild as HTMLImageElement;
-      const src = `/thumbs/s/${points.id[c.rep]}`;
+      const src = thumbUrl(points.id[c.rep]!, "s");
       if (img.getAttribute("src") !== src) {
         entry.el.classList.remove("pm-marker--broken");
         img.src = src;

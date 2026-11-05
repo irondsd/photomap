@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, type Points } from "./data";
+import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, thumbUrl, type Points } from "./data";
 import { buildLayout, firstVisible, galleryOrder, groupAt, HEADER_H, rowHeightFor, type Layout } from "./galleryLayout";
 import { BulkDateDialog } from "./BulkDate";
 import { BulkLocationDialog } from "./BulkLocation";
@@ -307,7 +307,7 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
           onClick={(e) => onTileClick(k, e)}
         >
           <img
-            src={`/thumbs/m/${id}`}
+            src={thumbUrl(id, "m")}
             alt=""
             loading="lazy"
             decoding="async"

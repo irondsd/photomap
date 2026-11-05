@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { nearestTagged, nf, SOURCE, type Points } from "./data";
+import { nearestTagged, nf, SOURCE, thumbUrl, type Points } from "./data";
 import { LocationPicker } from "./LocationPicker";
 import type { LatLon } from "./coords";
 
@@ -82,7 +82,7 @@ export function BulkLocationDialog({ points, ids, indexOf, onClose, onDone }: Bu
         </header>
         <div className="bulk-strip">
           {indices.slice(0, STRIP).map((i) => (
-            <img key={i} src={`/thumbs/s/${points.id[i]}`} alt="" />
+            <img key={i} src={thumbUrl(points.id[i]!, "s")} alt="" />
           ))}
           {indices.length > STRIP && <span className="bulk-more">+{nf.format(indices.length - STRIP)}</span>}
         </div>

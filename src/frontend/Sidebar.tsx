@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { formatDate, formatMonth, nf, type Points } from "./data";
+import { formatDate, formatMonth, nf, thumbUrl, type Points } from "./data";
 
 export type SidebarTab = "map" | "noloc";
 
@@ -76,7 +76,7 @@ function Grid({
           title={Number.isNaN(t) ? "Unknown date" : formatDate(t)}
         >
           <img
-            src={`/thumbs/s/${points.id[i]}`}
+            src={thumbUrl(points.id[i]!, "s")}
             alt=""
             loading="lazy"
             decoding="async"

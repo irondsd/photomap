@@ -249,3 +249,16 @@ export function localStorageSet(k: string, v: string) {
     // Storage can be unavailable (private mode, blocked); the setting just won't be remembered.
   }
 }
+
+// ---------------------------------------------------------------- thumbnails
+
+/** Bumped when a photo's edits change, so images already on the page load again. */
+const thumbStamps = new Map<number, number>();
+
+export function thumbUrl(id: number, size: "s" | "m" | "l"): string {
+  const v = thumbStamps.get(id);
+  return `/thumbs/${size}/${id}${v ? `?v=${v}` : ""}`;
+}
+
+export const thumbStamp = (id: number) => thumbStamps.get(id) ?? 0;
+export const bumpThumb = (id: number) => thumbStamps.set(id, Date.now());
