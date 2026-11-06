@@ -1885,3 +1885,47 @@ h4 {
     border-top: 1px solid #262626;
   }
 }
+
+.enhance-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+.enhance-option {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+  border: 1px solid #333;
+  border-radius: var(--radius);
+  background: #1f1f1f;
+  color: #ccc;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.enhance-option:hover:not(:disabled) {
+  background: #262626;
+}
+.enhance-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.enhance-option.is-on {
+  border-color: var(--accent);
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 16%, #1f1f1f);
+}
+.enhance-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.enhance-icon {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}

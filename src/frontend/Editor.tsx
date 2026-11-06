@@ -12,13 +12,16 @@ import {
   presetCrop,
   sameEdits,
   TWEAK_MIN,
+  TWEAKS,
   turn,
   type Aspect,
   type Edits,
   type Rect,
   type TweakName,
+  type Tweaks,
 } from "../edits/model";
 import { applyTweaks, toneMaps, type ToneMaps } from "../edits/tweaks";
+import { autoTweaks } from "../edits/auto";
 
 export interface EditablePhoto {
   id: number;
@@ -170,7 +173,7 @@ export function Editor({ photo, onDone }: EditorProps) {
   const [edits, setEdits] = useState<Edits>(initial);
   /** The crop the person chose; straightening shrinks it to fit, and grows it back. */
   const baseCrop = useRef<Rect>(initial.crop);
-  const [tab, setTab] = useState<Tab>("crop");
+  const [tab, setTab] = useState<Tab>("enhance");
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState<"save" | "copy" | null>(null);
@@ -223,7 +226,7 @@ export function Editor({ photo, onDone }: EditorProps) {
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const geomKey = `${edits.quarter}|${edits.angle}|${edits.crop.x}|${edits.crop.y}|${edits.crop.w}|${edits.crop.h}`;
   useEffect(() => {
-    if (!img || tab !== "tweaks") return;
+    if (!img || tab === "crop") return;
     const draw = (full: boolean) => {
       const c = outCanvas.current;
       if (!c) return;
@@ -324,6 +327,24 @@ export function Editor({ photo, onDone }: EditorProps) {
   };
   const setTweak = (key: TweakName, v: number) => setEdits((ed) => ({ ...ed, tweaks: { ...ed.tweaks, [key]: v } }));
 
+  // ---------------------------------------------------------------- enhance
+  /** What Auto set, and the tweaks it replaced, so pressing it again puts them back. */
+  const [auto, setAuto] = useState<{ before: Tweaks; result: Tweaks } | null>(null);
+  const autoOn = auto != null && TWEAKS.every((k) => edits.tweaks[k] === auto.result[k]);
+  const toggleAuto = () => {
+    if (!img) return;
+    if (autoOn && auto) {
+      setEdits((ed) => ({ ...ed, tweaks: auto.before }));
+      setAuto(null);
+      return;
+    }
+    // The untweaked picture as framed now: the model judges what will be saved.
+    const src = geom.current?.key === geomKey ? geom.current.draft : drawGeometry(img, edits, DRAFT);
+    const result = autoTweaks(src.data, src.width, src.height);
+    setAuto({ before: edits.tweaks, result });
+    setEdits((ed) => ({ ...ed, tweaks: result }));
+  };
+
   // ---------------------------------------------------------------- leaving
   const discard = useCallback(() => {
     if (busy) return;
@@ -390,7 +411,7 @@ export function Editor({ photo, onDone }: EditorProps) {
           <div className="editor-msg">This photo can't be opened for editing.</div>
         ) : !img ? (
           <div className="editor-msg">Loading…</div>
-        ) : tab === "tweaks" ? (
+        ) : tab !== "crop" ? (
           <canvas ref={outCanvas} className="editor-out" style={{ width: OW, height: OH }} />
         ) : (
           <>
@@ -485,11 +506,8 @@ export function Editor({ photo, onDone }: EditorProps) {
 
       <aside className="viewer-info editor-panel">
         <div className="tabs editor-tabs" role="tablist">
-          <button role="tab" className="tab" aria-selected={false} disabled aria-describedby="enhance-soon">
+          <button role="tab" className="tab" aria-selected={tab === "enhance"} onClick={() => setTab("enhance")}>
             Enhance
-            <span id="enhance-soon" className="sr-only">
-              Coming soon
-            </span>
           </button>
           <button role="tab" className="tab" aria-selected={tab === "crop"} onClick={() => setTab("crop")}>
             Crop
@@ -500,7 +518,42 @@ export function Editor({ photo, onDone }: EditorProps) {
         </div>
 
         <div className="editor-tools">
-          {tab === "crop" ? (
+          {tab === "enhance" ? (
+            <section>
+              <h4>Suggestions</h4>
+              <div className="enhance-options">
+                <button
+                  className={`enhance-option ${autoOn ? "is-on" : ""}`}
+                  aria-pressed={autoOn}
+                  onClick={toggleAuto}
+                  disabled={!img}
+                  title={autoOn ? "Click again to undo" : undefined}
+                >
+                  <svg viewBox="0 0 24 24" className="enhance-icon" aria-hidden>
+                    <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+                    <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" />
+                  </svg>
+                  Auto
+                </button>
+              </div>
+              {autoOn && auto ? (
+                <p className="dim small">
+                  {TWEAKS.some((k) => auto.result[k] !== 0)
+                    ? `Set ${TWEAK_ROWS.filter((r) => auto.result[r.key] !== 0)
+                        .map(
+                          (r) => `${r.label.toLowerCase()} ${auto.result[r.key] > 0 ? "+" : ""}${auto.result[r.key]}`,
+                        )
+                        .join(", ")}. Fine-tune it in Tweaks, or click Auto again to undo.`
+                    : "This photo already looks good: Auto changed nothing."}
+                </p>
+              ) : (
+                <p className="dim small">
+                  Picks brightness, contrast and colour for this photo. It sets the sliders in Tweaks, so you can adjust
+                  the result.
+                </p>
+              )}
+            </section>
+          ) : tab === "crop" ? (
             <section>
               <h4>Aspect ratio</h4>
               <div className="aspects">
