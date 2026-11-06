@@ -1921,6 +1921,56 @@ h4 {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+.presets {
+  display: grid;
+  /* Three across in the side panel; one row under the photo on narrow screens. */
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px 6px;
+  width: 100%;
+  margin-bottom: 10px;
+}
+.preset {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #ccc;
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.preset:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.preset-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: #1f1f1f;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.preset:hover:not(:disabled) .preset-thumb {
+  outline-color: #444;
+}
+.preset.is-on {
+  color: #fff;
+}
+.preset.is-on .preset-thumb {
+  outline-color: var(--accent);
+}
+.preset:focus-visible {
+  outline: 0;
+}
+.preset:focus-visible .preset-thumb {
+  outline-color: var(--accent);
+  outline-offset: 1px;
+}
 .enhance-icon {
   width: 22px;
   height: 22px;

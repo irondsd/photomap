@@ -22,6 +22,7 @@ import {
 } from "../edits/model";
 import { applyTweaks, toneMaps, type ToneMaps } from "../edits/tweaks";
 import { autoTweaks } from "../edits/auto";
+import { PRESETS, presetTweaks } from "../edits/presets";
 
 export interface EditablePhoto {
   id: number;
@@ -53,9 +54,19 @@ const TWEAK_ROWS: { key: TweakName; label: string }[] = [
   { key: "vignette", label: "Vignette" },
 ];
 
+const PRESET_ROWS = PRESETS.map((p) => ({ id: p.id, label: p.label, tweaks: presetTweaks(p) }));
+
+/** "brightness +12, warmth -8": what an enhance option set. */
+const describeTweaks = (t: Tweaks) =>
+  TWEAK_ROWS.filter((r) => t[r.key] !== 0)
+    .map((r) => `${r.label.toLowerCase()} ${t[r.key] > 0 ? "+" : ""}${t[r.key]}`)
+    .join(", ");
+
 /** Long side of the preview canvases; DRAFT while a slider is moving. */
 const PREVIEW = 1600;
 const DRAFT = 800;
+/** Long side of the preset previews (about twice their size on screen, for sharp displays). */
+const THUMB = 200;
 /** How long after the last change the full-size preview is drawn. */
 const SETTLE_MS = 160;
 /** Smallest crop, as a share of the frame. */
@@ -328,22 +339,48 @@ export function Editor({ photo, onDone }: EditorProps) {
   const setTweak = (key: TweakName, v: number) => setEdits((ed) => ({ ...ed, tweaks: { ...ed.tweaks, [key]: v } }));
 
   // ---------------------------------------------------------------- enhance
-  /** What Auto set, and the tweaks it replaced, so pressing it again puts them back. */
-  const [auto, setAuto] = useState<{ before: Tweaks; result: Tweaks } | null>(null);
-  const autoOn = auto != null && TWEAKS.every((k) => edits.tweaks[k] === auto.result[k]);
+  /**
+   * Auto and the presets each replace all the tweaks. `base` is what the tweaks were before the
+   * first of them, which Reset (or clicking the chosen one again) puts back; `id` and `result`
+   * are the one applied last.
+   */
+  const [enhance, setEnhance] = useState<{ base: Tweaks; id: string; result: Tweaks } | null>(null);
+  const sameTweaks = (a: Tweaks, b: Tweaks) => TWEAKS.every((k) => a[k] === b[k]);
+  /** The option the sliders still match, if any: moving a slider deselects it. */
+  const enhanceOn = enhance && sameTweaks(edits.tweaks, enhance.result) ? enhance : null;
+  const canResetEnhance = enhance != null && !sameTweaks(edits.tweaks, enhance.base);
+  const resetEnhance = () => {
+    if (!enhance) return;
+    setEdits((ed) => ({ ...ed, tweaks: enhance.base }));
+    setEnhance(null);
+  };
+  const applyEnhance = (id: string, result: () => Tweaks) => {
+    if (enhanceOn?.id === id) return resetEnhance();
+    const t = result();
+    setEnhance({ base: enhance?.base ?? edits.tweaks, id, result: t });
+    setEdits((ed) => ({ ...ed, tweaks: t }));
+  };
   const toggleAuto = () => {
     if (!img) return;
-    if (autoOn && auto) {
-      setEdits((ed) => ({ ...ed, tweaks: auto.before }));
-      setAuto(null);
-      return;
-    }
-    // The untweaked picture as framed now: the model judges what will be saved.
-    const src = geom.current?.key === geomKey ? geom.current.draft : drawGeometry(img, edits, DRAFT);
-    const result = autoTweaks(src.data, src.width, src.height);
-    setAuto({ before: edits.tweaks, result });
-    setEdits((ed) => ({ ...ed, tweaks: result }));
+    applyEnhance("auto", () => {
+      // The untweaked picture as framed now: the model judges what will be saved.
+      const src = geom.current?.key === geomKey ? geom.current.draft : drawGeometry(img, edits, DRAFT);
+      return autoTweaks(src.data, src.width, src.height);
+    });
   };
+  const enhanceLabel = enhanceOn
+    ? enhanceOn.id === "auto"
+      ? "Auto"
+      : (PRESET_ROWS.find((p) => p.id === enhanceOn.id)?.label ?? "")
+    : "";
+
+  /** The untweaked picture as framed now, small, for the preset previews, with its tone maps. */
+  const thumb = useMemo(() => {
+    if (!img || tab !== "enhance") return null;
+    const src = drawGeometry(img, edits, THUMB);
+    return { src, maps: toneMaps(src.data, src.width, src.height) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- geomKey stands for the geometry.
+  }, [img, tab, geomKey]);
 
   // ---------------------------------------------------------------- leaving
   const discard = useCallback(() => {
@@ -519,40 +556,66 @@ export function Editor({ photo, onDone }: EditorProps) {
 
         <div className="editor-tools">
           {tab === "enhance" ? (
-            <section>
-              <h4>Suggestions</h4>
-              <div className="enhance-options">
-                <button
-                  className={`enhance-option ${autoOn ? "is-on" : ""}`}
-                  aria-pressed={autoOn}
-                  onClick={toggleAuto}
-                  disabled={!img}
-                  title={autoOn ? "Click again to undo" : undefined}
-                >
-                  <svg viewBox="0 0 24 24" className="enhance-icon" aria-hidden>
-                    <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
-                    <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" />
-                  </svg>
-                  Auto
+            <>
+              <section>
+                <h4>Suggestions</h4>
+                <div className="enhance-options">
+                  <button
+                    className={`enhance-option ${enhanceOn?.id === "auto" ? "is-on" : ""}`}
+                    aria-pressed={enhanceOn?.id === "auto"}
+                    onClick={toggleAuto}
+                    disabled={!img}
+                    title={enhanceOn?.id === "auto" ? "Click again to undo" : undefined}
+                  >
+                    <svg viewBox="0 0 24 24" className="enhance-icon" aria-hidden>
+                      <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+                      <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" />
+                    </svg>
+                    Auto
+                  </button>
+                </div>
+                {enhanceOn ? (
+                  <p className="dim small">
+                    {TWEAKS.some((k) => enhanceOn.result[k] !== 0)
+                      ? `Set ${describeTweaks(enhanceOn.result)}. Fine-tune it in Tweaks, or click ${enhanceLabel} again to undo.`
+                      : "This photo already looks good: Auto changed nothing."}
+                  </p>
+                ) : (
+                  <p className="dim small">
+                    Auto picks brightness, contrast and colour for this photo; a preset gives it a look. They set the
+                    sliders in Tweaks, so you can adjust the result.
+                  </p>
+                )}
+              </section>
+              <section>
+                <h4>Presets</h4>
+                <div className="presets">
+                  {PRESET_ROWS.map((p) => {
+                    const on = enhanceOn?.id === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        className={`preset ${on ? "is-on" : ""}`}
+                        aria-pressed={on}
+                        onClick={() => applyEnhance(p.id, () => p.tweaks)}
+                        disabled={!img}
+                        title={on ? "Click again to undo" : undefined}
+                      >
+                        {thumb ? (
+                          <PresetThumb src={thumb.src} maps={thumb.maps} tweaks={p.tweaks} />
+                        ) : (
+                          <span className="preset-thumb" />
+                        )}
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button className="btn btn-small" onClick={resetEnhance} disabled={!canResetEnhance}>
+                  Reset enhance
                 </button>
-              </div>
-              {autoOn && auto ? (
-                <p className="dim small">
-                  {TWEAKS.some((k) => auto.result[k] !== 0)
-                    ? `Set ${TWEAK_ROWS.filter((r) => auto.result[r.key] !== 0)
-                        .map(
-                          (r) => `${r.label.toLowerCase()} ${auto.result[r.key] > 0 ? "+" : ""}${auto.result[r.key]}`,
-                        )
-                        .join(", ")}. Fine-tune it in Tweaks, or click Auto again to undo.`
-                    : "This photo already looks good: Auto changed nothing."}
-                </p>
-              ) : (
-                <p className="dim small">
-                  Picks brightness, contrast and colour for this photo. It sets the sliders in Tweaks, so you can adjust
-                  the result.
-                </p>
-              )}
-            </section>
+              </section>
+            </>
           ) : tab === "crop" ? (
             <section>
               <h4>Aspect ratio</h4>
@@ -623,6 +686,21 @@ export function Editor({ photo, onDone }: EditorProps) {
       </aside>
     </div>
   );
+}
+
+/** The framed photo with a preset's tweaks, drawn small. */
+function PresetThumb({ src, maps, tweaks }: { src: ImageData; maps: ToneMaps; tweaks: Tweaks }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const out = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+    applyTweaks(out.data, out.width, out.height, tweaks, { maps });
+    c.width = out.width;
+    c.height = out.height;
+    c.getContext("2d")!.putImageData(out, 0, 0);
+  }, [src, maps, tweaks]);
+  return <canvas ref={ref} className="preset-thumb" aria-hidden />;
 }
 
 function AspectIcon({ a, portrait }: { a: Aspect; portrait: boolean }) {
