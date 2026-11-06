@@ -28,7 +28,7 @@ export type TweakName = (typeof TWEAKS)[number];
 export type Tweaks = Record<TweakName, number>;
 
 /** Slider ranges; everything else goes from -100 to 100. */
-export const TWEAK_MIN: Partial<Record<TweakName, number>> = { hdr: 0 };
+export const TWEAK_MIN: Partial<Record<TweakName, number>> = { hdr: 0, pop: 0, vignette: 0 };
 
 export const ASPECTS = ["free", "16:9", "4:3", "1:1"] as const;
 export type Aspect = (typeof ASPECTS)[number];
@@ -41,7 +41,8 @@ export interface Rect {
 }
 
 export interface Edits {
-  v: 1;
+  /** 2: pop and vignette go from 0 (vignette darkens the edges). In 1 they went from -100, and a dark vignette was negative. */
+  v: 2;
   quarter: 0 | 1 | 2 | 3;
   /** Straightening, -45..45 degrees, clockwise. */
   angle: number;
@@ -58,7 +59,7 @@ export const FULL: Rect = { x: 0, y: 0, w: 1, h: 1 };
 export const noTweaks = (): Tweaks => Object.fromEntries(TWEAKS.map((k) => [k, 0])) as Tweaks;
 
 export const identity = (): Edits => ({
-  v: 1,
+  v: 2,
   quarter: 0,
   angle: 0,
   crop: { ...FULL },
@@ -113,13 +114,18 @@ export function parseEdits(raw: unknown, frameAspect?: number): Edits | null {
   const c = o.crop as Record<string, unknown> | undefined;
   const crop = c && { x: num(c.x), y: num(c.y), w: num(c.w), h: num(c.h) };
   if (quarter == null || angle == null || !crop || Object.values(crop).some((x) => x == null)) return null;
-  const t = (o.tweaks ?? {}) as Record<string, unknown>;
+  const t = { ...((o.tweaks ?? {}) as Record<string, unknown>) };
+  if (o.v === 1) {
+    // Version 1: a dark vignette was negative; a light one and a negative pop are gone.
+    t.vignette = Math.max(0, -(num(t.vignette) ?? 0));
+    t.pop = Math.max(0, num(t.pop) ?? 0);
+  }
   const tweaks = noTweaks();
   for (const k of TWEAKS) tweaks[k] = Math.round(clamp(num(t[k]) ?? 0, TWEAK_MIN[k] ?? -100, 100));
   const w = clamp(crop.w!, 0.01, 1);
   const h = clamp(crop.h!, 0.01, 1);
   const e: Edits = {
-    v: 1,
+    v: 2,
     quarter: (((Math.round(quarter) % 4) + 4) % 4) as Edits["quarter"],
     angle: clamp(angle, -MAX_ANGLE, MAX_ANGLE),
     crop: { x: clamp(crop.x!, 0, 1 - w), y: clamp(crop.y!, 0, 1 - h), w, h },

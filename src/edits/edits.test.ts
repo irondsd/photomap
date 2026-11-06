@@ -71,6 +71,14 @@ describe("parsing", () => {
     expect(parseEdits({ quarter: 1 })).toBeNull();
     expect(isIdentity(parseEdits(serialize(identity()))!)).toBe(true);
   });
+
+  test("version 1 edits: a dark vignette was negative, negative pop is dropped", () => {
+    const old = { ...identity(), v: 1, tweaks: { ...noTweaks(), vignette: -45, pop: -30 } };
+    expect(parseEdits(old)!.tweaks).toMatchObject({ vignette: 45, pop: 0 });
+    const light = { ...identity(), v: 1, tweaks: { ...noTweaks(), vignette: 60, pop: 40 } };
+    expect(parseEdits(light)!.tweaks).toMatchObject({ vignette: 0, pop: 40 });
+    expect(parseEdits({ ...identity(), tweaks: { ...noTweaks(), vignette: -20 } })!.tweaks.vignette).toBe(0);
+  });
 });
 
 describe("tweaks", () => {
@@ -104,7 +112,7 @@ describe("tweaks", () => {
       ["brightness", 60, 1],
       ["brightness", -60, -1],
       ["shadows", 70, 1],
-      ["vignette", -80, -1],
+      ["vignette", 80, -1],
     ] as const) {
       const d = gradient(64, 48);
       const before = mean(d);
@@ -115,7 +123,7 @@ describe("tweaks", () => {
 
   test("local effects don't depend on resolution", () => {
     // The same picture at two sizes, tweaked, then compared at the small size.
-    const t = { ...noTweaks(), hdr: 80, shadows: 50, highlights: -50, pop: 60, vignette: -40 };
+    const t = { ...noTweaks(), hdr: 80, shadows: 50, highlights: -50, pop: 60, vignette: 40 };
     const big = gradient(800, 600);
     const small = gradient(200, 150);
     applyTweaks(big, 800, 600, t);

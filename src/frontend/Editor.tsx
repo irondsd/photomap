@@ -599,7 +599,25 @@ function TweakSlider({
   return (
     <label className="tweak" onDoubleClick={() => onChange(0)} title="Double-click to reset">
       <span className="tweak-label">
-        {label}
+        <span className="tweak-name">
+          {label}
+          {value !== 0 && (
+            <button
+              type="button"
+              className="tweak-reset"
+              onClick={(e) => {
+                e.preventDefault();
+                onChange(0);
+              }}
+              aria-label={`Reset ${label}`}
+              title={`Reset ${label}`}
+            >
+              <svg viewBox="0 0 12 12" aria-hidden>
+                <path d="M3 3l6 6M9 3l-6 6" />
+              </svg>
+            </button>
+          )}
+        </span>
         <span className={`tweak-value ${value ? "is-set" : ""}`}>{value > 0 && min < 0 ? `+${value}` : value}</span>
       </span>
       <input

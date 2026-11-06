@@ -144,7 +144,7 @@ export function applyTweaks(
   const hl = t.highlights / 100;
   const pop = t.pop / 100;
   const vig = opts.vignette === false ? 0 : t.vignette / 100;
-  const sat = 1 + (t.saturation / 100) * (t.saturation > 0 ? 0.9 : 1) + hdr * 0.15 + Math.max(0, pop) * 0.12;
+  const sat = 1 + (t.saturation / 100) * (t.saturation > 0 ? 0.9 : 1) + hdr * 0.15 + pop * 0.12;
 
   // White balance as channel gains, normalised to keep the brightness.
   const warm = t.warmth / 100;
@@ -263,18 +263,11 @@ export function applyTweaks(
       if (vig) {
         const dx = (x + 0.5 - halfW) / halfW;
         const r2 = (dx * dx + dy * dy) / 2;
-        const m = vigMask[r2 >= 1 ? M : (r2 * M + 0.5) | 0]!;
-        if (vig < 0) {
-          const k = 1 + vig * 0.85 * m;
-          r *= k;
-          g *= k;
-          b *= k;
-        } else {
-          const k = vig * 0.75 * m;
-          r += (1 - r) * k;
-          g += (1 - g) * k;
-          b += (1 - b) * k;
-        }
+        // Darkens toward the edges.
+        const k = 1 - vig * 0.85 * vigMask[r2 >= 1 ? M : (r2 * M + 0.5) | 0]!;
+        r *= k;
+        g *= k;
+        b *= k;
       }
 
       data[p] = r <= 0 ? 0 : r >= 1 ? 255 : (r * 255 + 0.5) | 0;

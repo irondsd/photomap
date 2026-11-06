@@ -1736,6 +1736,7 @@ h4 {
 }
 .editor-exits .row .btn {
   flex: 1 1 auto;
+  justify-content: center;
   margin: 0;
   white-space: nowrap;
 }
@@ -1802,6 +1803,40 @@ h4 {
   justify-content: space-between;
   font-size: 13px;
   color: #ddd;
+}
+.tweak-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 18px;
+}
+.tweak-reset {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: #8f8b83;
+  cursor: pointer;
+}
+.tweak-reset:hover {
+  background: #2c2c2c;
+  color: #eee;
+}
+.tweak-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+.tweak-reset svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 .tweak-value {
   color: #77736a;
