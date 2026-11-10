@@ -159,7 +159,10 @@ export function Viewer({
   const i = indexOf(id);
   const isVideo = i != null && points.kind[i] === 2;
   const [detail, setDetail] = useState<PhotoDetail | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  /** The photo whose large image has loaded. Keyed by id, not reset in an effect: after a wheel event React runs
+   * effects only after paint, and a cached neighbour can finish loading before a reset would land. */
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const loaded = loadedId === id;
   const [showInfo, setShowInfo] = useState(() => localStorageGet("pm.info") !== "0");
   const [editing, setEditing] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
@@ -181,7 +184,6 @@ export function Viewer({
   const fullRequested = useRef<string | null>(null);
 
   useEffect(() => {
-    setLoaded(false);
     setEditing(false);
     setEditingDate(false);
     setEditingPhoto(false);
@@ -239,6 +241,38 @@ export function Viewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // A horizontal wheel (or sideways swipe) flips photos, one per flick: the travel adds up to a notch's
+  // worth before it steps, then the rest of that flick is ignored until the wheel pauses — or, if it keeps
+  // turning, for a moment, so a long steady turn walks through photos at a calm pace instead of racing.
+  const wheelNav = useRef({ acc: 0, lockedUntil: 0, lastEvent: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
+      const dx = e.deltaX * unit;
+      if (!dx || Math.abs(dx) <= Math.abs(e.deltaY * unit)) return;
+      // Keep the browser's swipe-to-go-back from firing.
+      e.preventDefault();
+      if (editingPhoto || zoom.zoomed) return;
+      const s = wheelNav.current;
+      const now = e.timeStamp;
+      const quiet = now - s.lastEvent > 180;
+      s.lastEvent = now;
+      if (quiet) s.lockedUntil = 0;
+      if (now < s.lockedUntil) return;
+      if (quiet || Math.sign(dx) !== Math.sign(s.acc)) s.acc = 0;
+      s.acc += dx;
+      if (Math.abs(s.acc) < 40) return;
+      const next = index + Math.sign(s.acc);
+      s.acc = 0;
+      s.lockedUntil = now + 450;
+      if (next >= 0 && next < ids.length) onIndex(next);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
   });
 
   const toggleInfo = () =>
@@ -401,7 +435,7 @@ export function Viewer({
               style={zoom.imgProps.style}
               draggable={false}
               onLoad={(e) => {
-                setLoaded(true);
+                setLoadedId(id);
                 zoom.imgProps.onLoad(e);
               }}
             />

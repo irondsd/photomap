@@ -94,7 +94,10 @@ export function useZoom(
   const [animate, setAnimate] = useState(false);
   const [panning, setPanning] = useState(false);
   /** The shown image's own size, once loaded, and the stage's: both needed to lay the image out. */
-  const [natural, setNatural] = useState<Size | null>(null);
+  // Kept with the photo it belongs to rather than cleared in an effect: after a wheel event React runs
+  // effects only after paint, and a cached neighbour can load before a clear would land, wiping its size.
+  const [loadedSize, setLoadedSize] = useState<{ key: unknown; size: Size } | null>(null);
+  const natural = loadedSize && loadedSize.key === photoKey ? loadedSize.size : null;
   const [stage, setStage] = useState<Size | null>(null);
   const viewRef = useRef(view);
   const baseRef = useRef<Size | null>(null);
@@ -130,7 +133,6 @@ export function useZoom(
     viewRef.current = IDENTITY;
     setAnimate(false);
     setView(IDENTITY);
-    setNatural(null);
   }, [photoKey]);
 
   /** Client coordinates → relative to the stage centre, where the unpanned image centre sits. */
@@ -159,7 +161,8 @@ export function useZoom(
       if ((e.target as Element).closest("button, a, .viewer-top")) return;
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
       const dy = e.deltaY * unit;
-      if (!dy) return;
+      // Mostly sideways is a horizontal wheel or swipe: the viewer flips photos with it.
+      if (!dy || Math.abs(e.deltaX * unit) > Math.abs(dy)) return;
       e.preventDefault();
       // Trackpad pinch arrives as Ctrl+wheel with small deltas: make it as fast as the fingers. Plain
       // scrolling zooms ~15% per mouse-wheel notch (~100px), eased so the steps don't jump.
@@ -249,7 +252,7 @@ export function useZoom(
 
   const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
-    setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+    setLoadedSize({ key: photoKey, size: { w: img.naturalWidth, h: img.naturalHeight } });
   };
 
   // Until the image has loaded the stylesheet centres it.
