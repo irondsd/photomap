@@ -45,6 +45,13 @@ export const thumbETag = (p: ThumbSource, size: RenderSize) => `"${size}${cacheK
 
 export const hasThumb = (p: ThumbSource, size: RenderSize) => existsSync(cacheFile(p, size));
 
+/** Removes a photo's cached renders, with and without its edits. */
+export async function dropThumbs(p: ThumbSource) {
+  const variants = p.edits ? [p, { ...p, edits: null }] : [p];
+  const sizes: RenderSize[] = [...THUMB_SIZES, "f"];
+  await Promise.all(variants.flatMap((v) => sizes.map((s) => rm(cacheFile(v, s), { force: true }))));
+}
+
 class Limiter {
   private active = 0;
   private queue: (() => void)[] = [];

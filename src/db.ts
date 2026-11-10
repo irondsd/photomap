@@ -251,6 +251,9 @@ export const getPhoto = (id: number) => db.query<PhotoRow, [number]>(`SELECT * F
 export const setEdits = (id: number, edits: string | null) =>
   db.run(`UPDATE photos SET edits = ? WHERE id = ?`, [edits, id]);
 
+/** Forgets a photo, with everything set on it in Photomap (edits, hand-set date and location). */
+export const deletePhoto = (id: number) => db.run(`DELETE FROM photos WHERE id = ?`, [id]);
+
 /** Compact columns used to build the client-side index. */
 export function allPoints() {
   return db

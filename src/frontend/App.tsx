@@ -478,7 +478,8 @@ export function App() {
                     <h1>Your photos, on a map</h1>
                     <p className="dim">
                       Point Photomap at a folder. It reads every photo and video inside it, including subfolders, and
-                      places them by their GPS data. Nothing leaves your computer and your files are never modified.
+                      places them by their GPS data. Nothing leaves your computer, and your files only change when you
+                      ask.
                     </p>
                     {scan?.running ? <ScanProgress scan={scan} /> : <AddFolder autoFocus onAdded={() => pollScan()} />}
                   </div>
@@ -536,6 +537,14 @@ export function App() {
           onClose={() => setViewer(null)}
           onShowOnMap={showOnMap}
           onLocationChange={refresh}
+          onDeleted={(id) => {
+            // On to the next photo (the previous one at the end); closed when none are left.
+            setViewer((v) => {
+              const ids = v?.ids.filter((x) => x !== id);
+              return ids?.length ? { ids, index: Math.min(v!.index, ids.length - 1) } : null;
+            });
+            refresh();
+          }}
         />
       )}
       {libraryOpen && (

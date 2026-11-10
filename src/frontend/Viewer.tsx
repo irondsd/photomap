@@ -66,6 +66,8 @@ interface ViewerProps {
   onShowOnMap(i: number): void;
   /** The photo's location, date or edits were changed; the caller should reload the index. */
   onLocationChange(): void;
+  /** The photo was moved to the Trash and is gone from the index. */
+  onDeleted(id: number): void;
 }
 
 async function sendEdits(url: string, method: string): Promise<PhotoDetail> {
@@ -141,7 +143,17 @@ function formatDuration(s: number) {
   return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 }
 
-export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOnMap, onLocationChange }: ViewerProps) {
+export function Viewer({
+  points,
+  ids,
+  index,
+  indexOf,
+  onIndex,
+  onClose,
+  onShowOnMap,
+  onLocationChange,
+  onDeleted,
+}: ViewerProps) {
   useBackToClose(onClose);
   const id = ids[index]!;
   const i = indexOf(id);
@@ -316,6 +328,27 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
     try {
       editsChanged(await sendEdits(`/api/photos/${id}/edits/apply`, "POST"));
       setNotice(`Edits written into ${d.name}.`);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const deletePhoto = async () => {
+    if (
+      !d ||
+      !confirm(
+        `Move ${d.name} to the Trash?\n\nIt's removed from Photomap too, along with its edits and any date or location you set here.`,
+      )
+    )
+      return;
+    setWorking(true);
+    try {
+      const r = await fetch(`/api/photos/${id}`, { method: "DELETE" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "Couldn't delete the photo");
+      onDeleted(id);
     } catch (err) {
       alert((err as Error).message);
     } finally {
@@ -556,7 +589,7 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                 </section>
               )}
 
-              {(d.camera || settings?.length) && (
+              {(d.camera || !!settings?.length) && (
                 <section>
                   <h4>Camera</h4>
                   {d.camera && <div>{d.camera}</div>}
@@ -587,6 +620,17 @@ export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOn
                     {d.edits ? "Open original file" : "Open original"}
                   </a>
                 </div>
+              </section>
+
+              <section>
+                <button
+                  className="btn btn-small btn-danger"
+                  onClick={deletePhoto}
+                  disabled={working}
+                  title="Move the file to the Trash and remove it from Photomap"
+                >
+                  Delete…
+                </button>
               </section>
             </>
           )}

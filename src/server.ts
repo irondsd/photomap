@@ -3,6 +3,7 @@ import index from "./frontend/index.html";
 import { HOST, PORT, CPUS } from "./config";
 import {
   db,
+  deletePhoto,
   getPhoto,
   getRoot,
   getRoots,
@@ -19,7 +20,8 @@ import { registerTarget, type ScanTarget } from "./scan/roots";
 import { restoreFromFile, setLocation } from "./scan/locate";
 import { isManualDate, parseManualDate, resetManualDates, setManualDate } from "./scan/manualDates";
 import { scanRoot, cancelScan, status as scanStatus } from "./scan/scanner";
-import { getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from "./thumbs";
+import { moveToTrash } from "./trash";
+import { dropThumbs, getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from "./thumbs";
 import { forbidden } from "./security";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
@@ -280,6 +282,24 @@ const server = Bun.serve({
         const p = id && getPhoto(id);
         if (!p) return bad("not found", 404);
         return detail(p);
+      }),
+      // The file goes to the Trash, and the photo leaves the index with everything set on it here.
+      DELETE: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const p = id && getPhoto(id);
+        if (!p) return bad("not found", 404);
+        // A file already gone from disk only needs forgetting.
+        if (await Bun.file(p.path).exists()) {
+          try {
+            await moveToTrash(p.path);
+          } catch (err) {
+            return bad(`Couldn't move the file to the Trash: ${(err as Error).message}`, 500);
+          }
+        }
+        deletePhoto(p.id);
+        await dropThumbs(p).catch(() => {});
+        dataVersion = Date.now();
+        return json({ ok: true });
       }),
     },
 

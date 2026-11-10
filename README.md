@@ -1,6 +1,6 @@
 # Photomap
 
-Your local photo library on a world map, with a zoomable timeline that acts as a filter. Everything runs on your machine, and your photos are only ever read, unless you run `bun run writeback --apply`.
+Your local photo library on a world map, with a zoomable timeline that acts as a filter. Everything runs on your machine, and your photos are only changed when you ask: `bun run writeback --apply`, writing edits into a file, or deleting a photo (to the Trash).
 
 ## Run
 
@@ -49,7 +49,7 @@ If both the browser and `curl` time out on `photomap.local` while `docker compos
 
 The container mounts this project's entire `data/` directory at `/app/data`: the SQLite index, its WAL/SHM files, and thumbnail cache stay on the Mac. Location and date edits update the existing `data/index.sqlite`; stopping, rebuilding, or removing the container does not delete them. The database and photos are excluded from the image.
 
-`~/Pictures/My Photos` is mounted read-only at its **same absolute path**, so existing indexed paths keep working without rescanning or rewriting the database. Both CameraRoll and Google Photos remain where they are. To use another library directory, set `PHOTOMAP_PHOTOS` in the shell or a local `.env` file before starting Compose. Its path must match the absolute paths in the index. Additional folders outside that directory need additional bind mounts with matching source and target paths. Missing source directories cause startup to fail rather than creating empty folders.
+`~/Pictures/My Photos` is mounted writable at its **same absolute path**, so existing indexed paths keep working without rescanning or rewriting the database. Both CameraRoll and Google Photos remain where they are. To use another library directory, set `PHOTOMAP_PHOTOS` in the shell or a local `.env` file before starting Compose. Its path must match the absolute paths in the index. Additional folders outside that directory need additional bind mounts with matching source and target paths. Missing source directories cause startup to fail rather than creating empty folders.
 
 Use either the Docker server or the native server at a time when editing or scanning the shared index; this keeps background scans, thumbnails, and SQLite locking on one side of the macOS/Linux boundary. Stop the Docker server with `docker compose stop` before switching to `bun run dev`. To back up the data folder, stop the app first and include the complete folder, including any WAL file.
 
@@ -58,12 +58,12 @@ docker compose logs -f app                 # server logs
 docker compose stop                       # stop; all local data stays in place
 docker compose up -d --build --wait        # start again, or rebuild after code changes
 docker compose exec app bun run scan      # rescan registered folders
-docker compose exec app bun run writeback # preview pending metadata writes
+docker compose exec app bun run writeback # preview pending metadata writes (add --apply to write them)
 ```
 
-Photos are mounted read-only, so applying `writeback` should be done with the native CLI after stopping the container. The image includes ffmpeg, ExifTool, LibRaw (RAW), and heif-convert (HEIC/HEIF). Linux decoding may differ from macOS ImageIO. Revealing files in macOS Finder requires running the app natively.
+The library is writable so the viewer can delete photos, write edits into files and save edited copies. Deleted photos go to the Mac's Trash: `~/.Trash` is mounted at the same path and `PHOTOMAP_TRASH_DIR` points at it. macOS won't let the container list the Trash, but moving files into it works. Files deleted from Docker don't get Finder's "Put Back"; drag them out of the Trash instead. Natively, Photomap uses the system Trash and "Put Back" works. A restored file is indexed again as a new photo on the next scan. The image includes ffmpeg, ExifTool, LibRaw (RAW), and heif-convert (HEIC/HEIF). Linux decoding may differ from macOS ImageIO. Revealing files in macOS Finder requires running the app natively.
 
-`HOST=0.0.0.0` is used inside the container, and the only host port published is phone sync's 4748. Since the container can't see the Mac's wifi address, set `PHOTOMAP_SYNC_URL=http://<your Mac's IP>:4748` in `.env` before turning sync on. Phone sync can write anywhere in `PHOTOMAP_SYNC_ROOT` (default `~/Pictures`), which is mounted writable; the library inside it stays read-only, so a sync folder can't be inside the library. Photomap refuses any folder outside the shared ones, so files can never end up inside the container. `PHOTOMAP_ALLOWED_HOSTS` explicitly permits `photomap.local` and the service's OrbStack domain; other custom hosts and cross-origin writes are rejected.
+`HOST=0.0.0.0` is used inside the container, and the only host port published is phone sync's 4748. Since the container can't see the Mac's wifi address, set `PHOTOMAP_SYNC_URL=http://<your Mac's IP>:4748` in `.env` before turning sync on. Phone sync can write anywhere in `PHOTOMAP_SYNC_ROOT` (default `~/Pictures`), which is mounted writable. Photomap refuses any folder outside the shared ones, so files can never end up inside the container. `PHOTOMAP_ALLOWED_HOSTS` explicitly permits `photomap.local` and the service's OrbStack domain; other custom hosts and cross-origin writes are rejected.
 
 ## Using it
 

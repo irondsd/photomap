@@ -15,6 +15,8 @@ services:
       # So ~ in folder paths typed into the app means the Mac's home folder, not the container's.
       PHOTOMAP_HOME: ${HOME}
       PHOTOMAP_SYNC_NAME: ${PHOTOMAP_SYNC_NAME:-Photomap}
+      # Deleted photos are moved into the Mac's Trash, mounted below.
+      PHOTOMAP_TRASH_DIR: ${HOME}/.Trash
     labels:
       dev.orbstack.domains: photomap.local
       dev.orbstack.http-port: "4747"
@@ -31,16 +33,22 @@ services:
         bind:
           create_host_path: false
       # Where phone sync may write: the sync folder can be any folder in here. At the same absolute
-      # path as on the Mac, so the index's paths stay valid. The library below stays read-only.
+      # path as on the Mac, so the index's paths stay valid.
       - type: bind
         source: "${PHOTOMAP_SYNC_ROOT:-${HOME}/Pictures}"
         target: "${PHOTOMAP_SYNC_ROOT:-${HOME}/Pictures}"
         bind:
           create_host_path: false
-      # Keep absolute paths identical to the paths already stored in SQLite.
+      # Keep absolute paths identical to the paths already stored in SQLite. Writable, for deleting
+      # photos (to the Trash), writing edits into files and saving edited copies.
       - type: bind
         source: "${PHOTOMAP_PHOTOS:-${HOME}/Pictures/My Photos}"
         target: "${PHOTOMAP_PHOTOS:-${HOME}/Pictures/My Photos}"
-        read_only: true
+        bind:
+          create_host_path: false
+      # The Mac's Trash. macOS doesn't let the container list it, only move files in.
+      - type: bind
+        source: "${HOME}/.Trash"
+        target: "${HOME}/.Trash"
         bind:
           create_host_path: false

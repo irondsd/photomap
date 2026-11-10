@@ -733,6 +733,13 @@ h4 {
 .viewer-info .btn-primary:hover {
   background: color-mix(in srgb, var(--accent) 88%, black);
 }
+.viewer-info .btn-danger {
+  color: #ff8787;
+}
+.viewer-info .btn-danger:hover {
+  background: #3a1f1f;
+  border-color: #5a2a2a;
+}
 .viewer-info .btn:disabled {
   opacity: 0.45;
 }

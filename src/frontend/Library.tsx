@@ -196,7 +196,8 @@ export function Library({
             }}
           />
           <p className="dim small">
-            Your photos are only read, never modified. The index and thumbnails live in the app's data folder.
+            Your files only change when you ask: writing edits into one, or deleting one to the Trash. The index and
+            thumbnails live in the app's data folder.
           </p>
           {scan?.running ? (
             <>
