@@ -23,6 +23,7 @@ import {
 import { applyTweaks, toneMaps, type ToneMaps } from "../edits/tweaks";
 import { autoTweaks } from "../edits/auto";
 import { PRESETS, presetTweaks } from "../edits/presets";
+import { useBackToClose } from "./history";
 
 export interface EditablePhoto {
   id: number;
@@ -383,11 +384,16 @@ export function Editor({ photo, onDone }: EditorProps) {
   }, [img, tab, geomKey]);
 
   // ---------------------------------------------------------------- leaving
+  /** false when the editor stays open. */
   const discard = useCallback(() => {
-    if (busy) return;
-    if (dirty && !confirm("Discard your changes?\n\nThe photo stays as it was before you started editing.")) return;
+    if (busy) return false;
+    if (dirty && !confirm("Discard your changes?\n\nThe photo stays as it was before you started editing."))
+      return false;
     onDone(null);
+    return true;
   }, [busy, dirty, onDone]);
+  // Back leaves the editor (asking first about unsaved changes), not the viewer.
+  useBackToClose(discard);
 
   const save = async () => {
     if (!dirty) return onDone(null);

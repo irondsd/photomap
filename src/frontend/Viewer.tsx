@@ -22,6 +22,7 @@ import { LocationPicker } from "./LocationPicker";
 import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
 import { useZoom } from "./zoom";
+import { useBackToClose } from "./history";
 
 interface PhotoDetail {
   id: number;
@@ -141,6 +142,7 @@ function formatDuration(s: number) {
 }
 
 export function Viewer({ points, ids, index, indexOf, onIndex, onClose, onShowOnMap, onLocationChange }: ViewerProps) {
+  useBackToClose(onClose);
   const id = ids[index]!;
   const i = indexOf(id);
   const isVideo = i != null && points.kind[i] === 2;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatDate, nf } from "./data";
 import { SyncSection } from "./Sync";
+import { useBackToClose } from "./history";
 
 export interface Stats {
   total: number;
@@ -124,6 +125,7 @@ export function Library({
   onClose(): void;
   onChanged(): void;
 }) {
+  useBackToClose(onClose);
   const [roots, setRoots] = useState<Root[]>([]);
   const reload = () =>
     api<Root[]>("/api/roots")
