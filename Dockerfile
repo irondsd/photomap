@@ -2,8 +2,9 @@ FROM oven/bun:1.4.4-debian
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates ffmpeg libheif-examples libimage-exiftool-perl libraw-bin \
-    && rm -rf /var/lib/apt/lists/*
+       ca-certificates ffmpeg libheif-examples libimage-exiftool-perl libraw-bin libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s "/usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2" /usr/local/lib/libjemalloc.so.2
 
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
@@ -13,7 +14,11 @@ COPY --chown=bun:bun src ./src
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4747 \
-    PHOTOMAP_DATA=/app/data
+    PHOTOMAP_DATA=/app/data \
+    # glibc's malloc keeps what sharp frees on each render thread (~1 GB after a thumbnail burst);
+    # jemalloc hands it back, and its background thread does so while the app sits idle.
+    LD_PRELOAD=/usr/local/lib/libjemalloc.so.2 \
+    MALLOC_CONF=background_thread:true
 
 USER bun
 EXPOSE 4747
