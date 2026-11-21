@@ -7,7 +7,9 @@ const args = Bun.argv.slice(2);
 if (args.some((arg) => arg !== "--retry-failed")) {
   throw new Error("Usage: bun run people:detect [--retry-failed]");
 }
-requireCopiedIndex();
+if (process.env.PHOTOMAP_PEOPLE_AUTO !== "1" || process.env.PHOTOMAP_PEOPLE_PREVIEW === "1") {
+  requireCopiedIndex();
+}
 
 const { db } = await import("../db");
 const { CPUS, DATA_DIR } = await import("../config");

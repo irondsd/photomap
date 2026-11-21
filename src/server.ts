@@ -55,8 +55,8 @@ import { withPhotoVisibility, type PhotoVisibility } from "./photo-visibility";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
-const peopleAuto = PEOPLE_PREVIEW && process.env.PHOTOMAP_PEOPLE_AUTO === "1";
-if (PEOPLE_PREVIEW) db.run("PRAGMA busy_timeout = 5000");
+const peopleAuto = process.env.PHOTOMAP_PEOPLE_AUTO === "1";
+if (PEOPLE_PREVIEW || peopleAuto) db.run("PRAGMA busy_timeout = 5000");
 if (hasPeople() || peopleAuto) initPeople();
 
 /** Bumped whenever the index changes so the client knows to refetch points. */

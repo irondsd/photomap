@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     environment:
       PHOTOMAP_ALLOWED_HOSTS: photomap.local,app.photomap.orb.local
+      # Match newly indexed photos locally using models packaged in the image.
+      PHOTOMAP_PEOPLE_AUTO: ${PHOTOMAP_PEOPLE_AUTO:-1}
+      PHOTOMAP_FACE_WORKERS: ${PHOTOMAP_FACE_WORKERS:-2}
       # Phone sync: the container can't see the Mac's wifi address, so set it in .env,
       # e.g. PHOTOMAP_SYNC_URL=http://192.168.1.20:4748
       PHOTOMAP_SYNC_URL: ${PHOTOMAP_SYNC_URL:-}
