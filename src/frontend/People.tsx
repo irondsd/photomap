@@ -32,6 +32,83 @@ function Portrait({ person, visibility }: { person: PersonSummary; visibility: P
   );
 }
 
+function PeopleCard({
+  person,
+  visibility,
+  selected,
+  disabled,
+  onHold,
+  onActivate,
+}: {
+  person: PersonSummary;
+  visibility: PhotoVisibility;
+  selected?: boolean;
+  disabled: boolean;
+  onHold?: () => void;
+  onActivate(): void;
+}) {
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const consumed = useRef(false);
+  const cancelPress = () => {
+    if (press.current) clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  useEffect(() => cancelPress, [onHold == null]);
+  const selectable = onHold != null || selected !== undefined;
+
+  return (
+    <button
+      className={selectable ? "album-card people-selectable" : "album-card"}
+      disabled={disabled}
+      aria-pressed={selected}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        consumed.current = false;
+        if (!onHold) return;
+        cancelPress();
+        const { currentTarget: button, pointerId, clientX: x, clientY: y } = event;
+        press.current = {
+          x,
+          y,
+          timer: setTimeout(() => {
+            consumed.current = true;
+            press.current = null;
+            button.setPointerCapture(pointerId);
+            onHold();
+          }, 500),
+        };
+      }}
+      onPointerMove={(event) => {
+        const start = press.current;
+        if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelPress();
+      }}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
+      onPointerLeave={cancelPress}
+      onContextMenu={selectable ? (event) => event.preventDefault() : undefined}
+      onClick={(event) => {
+        // The release of a long press already selected this card.
+        if (event.detail && consumed.current) {
+          consumed.current = false;
+          return;
+        }
+        onActivate();
+      }}
+    >
+      <Portrait person={person} visibility={visibility} />
+      {selected !== undefined && (
+        <span className="people-selection-check" aria-hidden>
+          {selected && <Icon name="check" />}
+        </span>
+      )}
+      <strong>{personName(person)}</strong>
+      <span className="album-card-meta dim">
+        {photoCount(person.count)} · {albumDates(person)}
+      </span>
+    </button>
+  );
+}
+
 export function PeopleView({
   personId,
   hiddenOpen,
@@ -91,20 +168,13 @@ export function PeopleView({
   const [edit, setEdit] = useState<"name" | "merge" | null>(null);
   const [cover, setCover] = useState<Omit<CoverPickerState, "onSave" | "onCancel"> | null>(null);
   const [selectedPeople, setSelectedPeople] = useState<Set<number> | null>(null);
-  const [bulkMerge, setBulkMerge] = useState(false);
+  const [bulkMerge, setBulkMerge] = useState<number[] | null>(null);
   const [bulkHiding, setBulkHiding] = useState(false);
   const [bulkFeedback, setBulkFeedback] = useState<{ text: string; error?: boolean } | null>(null);
-  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
-  const heldCard = useRef<number | null>(null);
-  const cancelHold = () => {
-    if (hold.current) clearTimeout(hold.current.timer);
-    hold.current = null;
-  };
-  const bulkEnabled = catalog?.bulkEditing === true && personId == null && !hiddenOpen;
+  const bulkEnabled = !hiddenOpen && personId == null;
   const selecting = bulkEnabled && selectedPeople != null;
   const selectedCount = selecting ? selectedPeople!.size : 0;
 
-  useEffect(() => cancelHold, [personId, hiddenOpen]);
   useEffect(() => {
     if (!selecting || bulkMerge || bulkHiding) return;
     const onKey = (event: KeyboardEvent) => {
@@ -145,7 +215,13 @@ export function PeopleView({
     setCatalogError("");
     albumRequest<PeopleCatalog>(withPhotoVisibility("people", visibility), "GET", undefined, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setCatalog(value);
+        if (controller.signal.aborted) return;
+        setCatalog(value);
+        const available = new Set(value.people.filter((group) => group.name == null).map((group) => group.id));
+        setSelectedPeople((selected) => {
+          if (!selected || [...selected].every((id) => available.has(id))) return selected;
+          return new Set([...selected].filter((id) => available.has(id)));
+        });
       })
       .catch((error: Error) => {
         if (!controller.signal.aborted) setCatalogError(error.message);
@@ -265,7 +341,7 @@ export function PeopleView({
             <button
               className="btn btn-primary"
               disabled={!selectedCount || bulkHiding}
-              onClick={() => setBulkMerge(true)}
+              onClick={() => setBulkMerge([...(selectedPeople ?? [])])}
             >
               Merge…
             </button>
@@ -301,54 +377,19 @@ export function PeopleView({
             <div className="album-cards people-cards">
               {matching.slice(0, limit).map((entry) => {
                 const canSelect = bulkEnabled && entry.name == null;
-                const selected = selectedPeople?.has(entry.id) ?? false;
                 return (
-                  <button
-                    className={canSelect ? "album-card people-selectable" : "album-card"}
+                  <PeopleCard
                     key={entry.id}
+                    person={entry}
+                    visibility={visibility}
+                    selected={selecting && canSelect ? selectedPeople!.has(entry.id) : undefined}
                     disabled={selecting && (!canSelect || bulkHiding)}
-                    aria-pressed={selecting && canSelect ? selected : undefined}
-                    onPointerDown={
-                      canSelect
-                        ? (event) => {
-                            heldCard.current = null;
-                            if (selecting || event.button !== 0 || !event.isPrimary) return;
-                            cancelHold();
-                            hold.current = {
-                              x: event.clientX,
-                              y: event.clientY,
-                              timer: setTimeout(() => {
-                                heldCard.current = entry.id;
-                                setSelectedPeople(new Set([entry.id]));
-                                hold.current = null;
-                              }, 500),
-                            };
-                          }
-                        : undefined
-                    }
-                    onPointerMove={
-                      canSelect
-                        ? (event) => {
-                            const start = hold.current;
-                            if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10)
-                              cancelHold();
-                          }
-                        : undefined
-                    }
-                    onPointerUp={canSelect ? cancelHold : undefined}
-                    onPointerCancel={canSelect ? cancelHold : undefined}
-                    onPointerLeave={canSelect ? cancelHold : undefined}
-                    onContextMenu={canSelect ? (event) => event.preventDefault() : undefined}
-                    onClick={(event) => {
-                      if (event.detail && heldCard.current === entry.id) {
-                        heldCard.current = null;
-                        return;
-                      }
+                    onHold={canSelect && !selecting ? () => setSelectedPeople(new Set([entry.id])) : undefined}
+                    onActivate={() => {
                       if (!selecting) {
                         onOpen(entry.id);
                         return;
                       }
-                      if (!canSelect) return;
                       setBulkFeedback(null);
                       setSelectedPeople((current) => {
                         const updated = new Set(current);
@@ -357,18 +398,7 @@ export function PeopleView({
                         return updated;
                       });
                     }}
-                  >
-                    <Portrait person={entry} visibility={visibility} />
-                    {selecting && canSelect && (
-                      <span className="people-selection-check" aria-hidden>
-                        {selected && <Icon name="check" />}
-                      </span>
-                    )}
-                    <strong>{personName(entry)}</strong>
-                    <span className="album-card-meta dim">
-                      {photoCount(entry.count)} · {albumDates(entry)}
-                    </span>
-                  </button>
+                  />
                 );
               })}
               {!hiddenOpen && !selecting && (
@@ -398,21 +428,21 @@ export function PeopleView({
             )}
           </>
         )}
-        {bulkMerge && selectedPeople && catalog && (
+        {bulkMerge && catalog && (
           <PersonDialog
             action="bulk-merge"
-            ids={[...selectedPeople]}
+            ids={bulkMerge}
             people={[...catalog.people].sort(
               (a, b) =>
                 Number(b.name != null) - Number(a.name != null) ||
-                Number(selectedPeople.has(b.id)) - Number(selectedPeople.has(a.id)),
+                Number(bulkMerge.includes(b.id)) - Number(bulkMerge.includes(a.id)),
             )}
             visibility={visibility}
-            onClose={() => setBulkMerge(false)}
+            onClose={() => setBulkMerge(null)}
             onSave={(target) => {
               const kept = catalog.people.find((entry) => entry.id === target);
-              const moved = selectedPeople.size - Number(target != null && selectedPeople.has(target));
-              setBulkMerge(false);
+              const moved = bulkMerge.length - Number(target != null && bulkMerge.includes(target));
+              setBulkMerge(null);
               bulkDone(`Merged ${peopleCount(moved)} into ${kept ? personName(kept) : "the chosen group"}.`);
             }}
           />

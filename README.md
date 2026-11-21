@@ -104,6 +104,8 @@ The **People** tab groups photos by detected faces. Groups start unnamed. Open a
 
 Use **Hide person** on a group to move it out of the main People grid. Open the **Hidden people** card at the end of the grid and choose **Unhide person** to restore a group. Its photos stay in the library, and face matching continues to update the group.
 
+To clean up several unnamed groups at once, click **Select** or press and hold an unnamed group in the People grid. Pick the groups you want to change. **Merge…** asks you which group to keep, and **Hide selected** moves the selection to **Hidden people**.
+
 Docker Compose includes the local detection models and enables background matching for new or changed photos as they are indexed. The People data is stored in the existing SQLite index. Set `PHOTOMAP_PEOPLE_AUTO=0` in `.env` to pause automatic detection.
 
 ### Isolated preview

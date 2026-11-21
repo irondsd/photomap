@@ -98,6 +98,7 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
     expect(listPeople("all").people).toEqual([
       { ...summary, count: 2, coverId: privateFace, coverPhotoId: privatePhoto, last },
     ]);
+
     expect(listPeople("public").people).toEqual([summary]);
     expect(setPersonHidden(b, true, "public")).toBe(true);
     expect(setPersonHidden(b, true, "public")).toBe(true);
@@ -125,6 +126,15 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
     expect(listPeople("all").people).toEqual([
       { ...summary, count: 2, coverId: privateFace, coverPhotoId: privatePhoto, last },
     ]);
+
+    const keep = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
+    const duplicate = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
+    face(publicPhoto, keep, 0.5);
+    face(privatePhoto, duplicate, 0.5);
+    expect(bulkEditPeople.immediate([keep, keep], keep, "all")).toBe(false);
+    expect(bulkEditPeople.immediate([keep, duplicate, keep], keep, "all")).toBe(true);
+    expect(personPhotos(keep, "all")).toEqual([publicPhoto, privatePhoto]);
+    expect(personPhotos(duplicate, "all")).toBeNull();
 
     db.run("UPDATE photos SET mtime = 2 WHERE id = ?", [publicPhoto]);
     expect(personPhotos(b, "public")).toBeNull();

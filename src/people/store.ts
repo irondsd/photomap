@@ -22,7 +22,6 @@ export interface PersonDetail {
 export interface PeopleCatalog {
   people: PersonSummary[];
   hiddenPeople: PersonSummary[];
-  bulkEditing?: boolean;
   scanned: number;
   failed: number;
   total: number;

@@ -57,7 +57,6 @@ import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder"
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
 const peopleAuto = process.env.PHOTOMAP_PEOPLE_AUTO === "1";
-const peopleBulk = process.env.PHOTOMAP_PEOPLE_BULK === "1";
 if (PEOPLE_PREVIEW || peopleAuto) db.run("PRAGMA busy_timeout = 5000");
 if (hasPeople() || peopleAuto) initPeople();
 
@@ -348,12 +347,11 @@ const server = Bun.serve({
     },
 
     "/api/people": {
-      GET: guard((req) => json({ ...listPeople(photoVisibility(req)), bulkEditing: peopleBulk }, { headers: noStore })),
+      GET: guard((req) => json(listPeople(photoVisibility(req)), { headers: noStore })),
     },
 
     "/api/people/bulk": {
       POST: guard(async (req) => {
-        if (!peopleBulk) return bad("Not found", 404);
         const body = (await req.json().catch(() => null)) as { ids?: unknown; target?: unknown } | null;
         const rawIds = body?.ids;
         const ids = Array.isArray(rawIds) && rawIds.every(Number.isSafeInteger) ? parseIds(rawIds) : null;
