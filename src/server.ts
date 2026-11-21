@@ -21,6 +21,8 @@ import {
   getRoots,
   removeRoot,
   setEdits,
+  setPhotosPrivate,
+  photoVisibilityFilter,
   stats,
   cameraName,
   type PhotoRow,
@@ -28,13 +30,14 @@ import {
 } from "./db";
 import { editedSize, frameSize, isIdentity, parseEdits, serialize } from "./edits/model";
 import { canWriteInto, saveCopy, writeIntoFile } from "./edits/files";
-import { registerTarget, type ScanTarget } from "./scan/roots";
+import { registerTarget, relinkRoot, type ScanTarget } from "./scan/roots";
 import { restoreFromFile, setLocation } from "./scan/locate";
 import { isManualDate, parseManualDate, resetManualDates, setManualDate } from "./scan/manualDates";
 import { scanRoot, cancelScan, status as scanStatus } from "./scan/scanner";
 import { moveToTrash } from "./trash";
 import { dropThumbs, getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZES, type ThumbSize } from "./thumbs";
 import { forbidden } from "./security";
+import { withPhotoVisibility, type PhotoVisibility } from "./photo-visibility";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
@@ -52,10 +55,15 @@ function guard<R extends Request>(h: Handler<R>): Handler<R> {
 }
 
 const json = (data: unknown, init?: ResponseInit) => Response.json(data, init);
+const noStore = { "cache-control": "no-store" };
+const bad = (message: string, status = 400) => json({ error: message }, { status, headers: noStore });
 
 /** What the viewer shows about one photo. */
 const detail = (p: PhotoRow) =>
-  json({ ...p, camera: cameraName(p.make, p.model), edits: parseEdits(p.edits), writable: canWriteInto(p) });
+  json(
+    { ...p, camera: cameraName(p.make, p.model), edits: parseEdits(p.edits), writable: canWriteInto(p) },
+    { headers: noStore },
+  );
 
 /** Submitted edits for photo p, fitted to its shape; null to clear them. undefined when malformed. */
 function editsFor(p: PhotoRow, raw: unknown) {
@@ -66,7 +74,15 @@ function editsFor(p: PhotoRow, raw: unknown) {
   const fitted = fw && fh ? parseEdits(e, fw / fh)! : e;
   return isIdentity(fitted) ? null : fitted;
 }
-const bad = (message: string, status = 400) => json({ error: message }, { status });
+function photoVisibility(req: Request): PhotoVisibility {
+  const value = new URL(req.url).searchParams.get("visibility");
+  return value === "private" || value === "all" ? value : "public";
+}
+
+function visiblePhoto(id: number, visibility: PhotoVisibility) {
+  const photo = getPhoto(id);
+  return photo && (visibility === "all" || photo.is_private === Number(visibility === "private")) ? photo : null;
+}
 
 // ---------------------------------------------------------------- points
 const KIND_CODE: Record<string, number> = { photo: 0, raw: 1, video: 2 };
@@ -84,7 +100,7 @@ function sourceCode(gps: string | null): number {
  *   | f64 t[n] | f32 lat[n] | f32 lon[n] | f32 aspect[n] | u32 id[n]
  *   | u16 country[n] (0 = none, else 1 + index into the names) | u8 kind[n] | u8 source[n]
  *   | u8 datePrecision[n] (0 exact, 1 estimated, 2 year only, 3 unknown) | u8 dateManual[n] (1 = set by hand)
- * Missing time/coords/aspect are NaN. ~31 bytes per photo.
+ *   | u8 isPrivate[n] (1 = private). Missing time/coords/aspect are NaN. 31 bytes per photo.
  */
 /** How far a photo's date can be trusted, from its time source. */
 function datePrecision(ts: string | null): number {
@@ -94,7 +110,7 @@ function datePrecision(ts: string | null): number {
   return 0;
 }
 
-function encodePoints(): ArrayBuffer {
+function encodePoints(visibility: PhotoVisibility): ArrayBuffer {
   const rows = db
     .query<
       {
@@ -109,10 +125,12 @@ function encodePoints(): ArrayBuffer {
         gps: string | null;
         ts: string | null;
         edits: string | null;
+        is_private: number;
       },
       []
     >(
-      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps, time_source ts, edits FROM photos WHERE missing = 0
+      `SELECT id, taken_local t, lat, lon, kind, width w, height h, country, gps_source gps, time_source ts, edits, is_private
+       FROM photos WHERE missing = 0${photoVisibilityFilter(visibility)}
        ORDER BY taken_local IS NULL, taken_local, id`,
     )
     .all();
@@ -127,7 +145,7 @@ function encodePoints(): ArrayBuffer {
   }
   const json = new TextEncoder().encode(JSON.stringify(countries));
   const head = 8 + Math.ceil(json.length / 8) * 8;
-  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1 + 1 + 1));
+  const buf = new ArrayBuffer(head + n * (8 + 4 + 4 + 4 + 4 + 2 + 1 + 1 + 1 + 1 + 1));
   new Uint32Array(buf, 0, 2).set([n, json.length]);
   new Uint8Array(buf, 8, json.length).set(json);
   let off = head;
@@ -146,8 +164,10 @@ function encodePoints(): ArrayBuffer {
   const source = col(Uint8Array, 1);
   const precision = col(Uint8Array, 1);
   const dateManual = col(Uint8Array, 1);
+  const isPrivate = col(Uint8Array, 1);
   for (let i = 0; i < n; i++) {
     const r = rows[i]!;
+    isPrivate[i] = r.is_private;
     t[i] = r.t ?? NaN;
     lat[i] = r.lat ?? NaN;
     lon[i] = r.lon ?? NaN;
@@ -285,17 +305,19 @@ const server = Bun.serve({
 
     "/api/points": {
       GET: guard(
-        () =>
-          new Response(encodePoints(), {
-            headers: { "content-type": "application/octet-stream", "cache-control": "no-store" },
+        (req) =>
+          new Response(encodePoints(photoVisibility(req)), {
+            headers: { "content-type": "application/octet-stream", ...noStore },
           }),
       ),
     },
 
-    "/api/stats": { GET: guard(() => json({ ...stats(), version: currentVersion() })) },
+    "/api/stats": {
+      GET: guard((req) => json({ ...stats(photoVisibility(req)), version: currentVersion() }, { headers: noStore })),
+    },
 
     "/api/albums": {
-      GET: guard(() => json(albumCatalog())),
+      GET: guard((req) => json(albumCatalog(photoVisibility(req)), { headers: noStore })),
       POST: guard(async (req) => {
         const body = (await req.json().catch(() => null)) as { name?: unknown; ids?: unknown } | null;
         const name = albumName(body?.name);
@@ -310,7 +332,7 @@ const server = Bun.serve({
       GET: guard((req) => {
         const id = idParam(req.params.id);
         if (!id || !getAlbum(id)) return bad("Album not found", 404);
-        return json(albumPhotoIds(id));
+        return json(albumPhotoIds(id, photoVisibility(req)), { headers: noStore });
       }),
       PATCH: guard(async (req) => {
         const id = idParam(req.params.id);
@@ -356,14 +378,27 @@ const server = Bun.serve({
     "/api/photos/:id/albums": {
       GET: guard((req) => {
         const id = idParam(req.params.id);
-        return id ? json(photoAlbums(id)) : bad("Photo not found", 404);
+        return id && visiblePhoto(id, photoVisibility(req))
+          ? json(photoAlbums(id), { headers: noStore })
+          : bad("Photo not found", 404);
+      }),
+    },
+
+    "/api/photos/privacy": {
+      PUT: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { ids?: unknown; private?: unknown } | null;
+        const ids = parseIds(body?.ids);
+        if (!ids || typeof body?.private !== "boolean") return bad("Choose photos and their visibility.");
+        const changed = setPhotosPrivate(ids, body.private);
+        if (changed.length) dataVersion = Math.max(dataVersion + 1, Date.now());
+        return json({ changed }, { headers: noStore });
       }),
     },
 
     "/api/photos/:id/favorite": {
       PUT: guard(async (req) => {
         const id = idParam(req.params.id);
-        if (!id) return bad("Photo not found", 404);
+        if (!id || !visiblePhoto(id, photoVisibility(req))) return bad("Photo not found", 404);
         const body = (await req.json().catch(() => null)) as { favorite?: unknown } | null;
         if (typeof body?.favorite !== "boolean") return bad("favorite must be a boolean");
         return setFavorite(id, body.favorite) ? json({ ok: true }) : bad("Photo not found", 404);
@@ -373,14 +408,14 @@ const server = Bun.serve({
     "/api/photos/:id": {
       GET: guard((req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         return detail(p);
       }),
       // The file goes to the Trash, and the photo leaves the index with everything set on it here.
       DELETE: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         // A file already gone from disk only needs forgetting.
         if (await Bun.file(p.path).exists()) {
@@ -401,7 +436,7 @@ const server = Bun.serve({
     "/api/photos/:id/edits": {
       PUT: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         if (p.kind === "video") return bad("Videos can't be edited");
         const body = (await req.json().catch(() => null)) as { edits?: unknown } | null;
@@ -414,7 +449,7 @@ const server = Bun.serve({
       // Back to the photo as it is in the file.
       DELETE: guard((req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         setEdits(p.id, null);
         dataVersion = Date.now();
@@ -426,7 +461,7 @@ const server = Bun.serve({
     "/api/photos/:id/edits/copy": {
       POST: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         if (p.kind === "video") return bad("Videos can't be edited");
         if (p.missing) return bad("The file is no longer on disk", 409);
@@ -447,7 +482,7 @@ const server = Bun.serve({
     "/api/photos/:id/edits/apply": {
       POST: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         if (p.missing) return bad("The file is no longer on disk", 409);
         const e = parseEdits(p.edits);
@@ -467,7 +502,7 @@ const server = Bun.serve({
     "/api/photos/:id/location": {
       POST: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         // Allowed even when the file has GPS: those are sometimes plainly wrong.
         const body = (await req.json().catch(() => null)) as { lat?: unknown; lon?: unknown } | null;
@@ -483,7 +518,7 @@ const server = Bun.serve({
       // Undo a hand-set location: back to whatever the file says (its own GPS, or none).
       DELETE: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         if (p.gps_source !== "manual") return bad("Only locations set by hand can be reset", 409);
         if (p.missing) return bad("The file is no longer on disk", 409);
@@ -504,10 +539,11 @@ const server = Bun.serve({
         if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
           return bad("lat and lon must be valid coordinates");
         }
+        const visibility = photoVisibility(req);
         let changed = 0;
         db.transaction(() => {
           for (const id of ids) {
-            if (!getPhoto(id)) continue;
+            if (!visiblePhoto(id, visibility)) continue;
             setLocation(id, { lat, lon, source: "manual" });
             changed++;
           }
@@ -522,9 +558,10 @@ const server = Bun.serve({
         const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
         const ids = parseIds(body?.ids);
         if (!ids) return bad("ids must be a non-empty list of photo ids");
+        const visibility = photoVisibility(req);
         let reset = 0;
         for (const id of ids) {
-          const p = getPhoto(id);
+          const p = visiblePhoto(id, visibility);
           if (!p || p.gps_source !== "manual" || p.missing) continue;
           await restoreFromFile(id);
           reset++;
@@ -538,7 +575,7 @@ const server = Bun.serve({
     "/api/photos/:id/date": {
       POST: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         const body = (await req.json().catch(() => null)) as { date?: unknown; time?: unknown } | null;
         const d = parseManualDate(body?.date, body?.time);
@@ -550,7 +587,7 @@ const server = Bun.serve({
       // Undo: back to the date from the file, or inferred from the files around it.
       DELETE: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         if (!isManualDate(p.time_source)) return bad("Only dates set by hand can be reset", 409);
         if (p.missing) return bad("The file is no longer on disk", 409);
@@ -567,9 +604,12 @@ const server = Bun.serve({
         const d = parseManualDate(body?.date, body?.time);
         if (!ids) return bad("ids must be a non-empty list of photo ids");
         if (!d) return bad("date must be YYYY-MM-DD, and time HH:MM if given");
+        const visibility = photoVisibility(req);
         let changed = 0;
         db.transaction(() => {
-          for (const id of ids) if (setManualDate(id, d)) changed++;
+          for (const id of ids) {
+            if (visiblePhoto(id, visibility) && setManualDate(id, d)) changed++;
+          }
         })();
         dataVersion = Date.now();
         return json({ changed });
@@ -581,7 +621,8 @@ const server = Bun.serve({
         const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
         const ids = parseIds(body?.ids);
         if (!ids) return bad("ids must be a non-empty list of photo ids");
-        const reset = await resetManualDates(ids);
+        const visibility = photoVisibility(req);
+        const reset = await resetManualDates(ids.filter((id) => visiblePhoto(id, visibility)));
         dataVersion = Date.now();
         return json({ reset: reset.length });
       }),
@@ -603,6 +644,22 @@ const server = Bun.serve({
     },
 
     "/api/roots/:id": {
+      PATCH: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { path?: unknown } | null;
+        if (typeof body?.path !== "string" || !body.path.trim()) return bad("path required");
+        const id = idParam(req.params.id);
+        const root = id && getRoot(id);
+        if (!root) return bad("folder not found", 404);
+        if (scanStatus.running) return bad("Wait for scanning to finish before changing a folder.", 409);
+        try {
+          const updated = relinkRoot(root, body.path.trim());
+          dataVersion = Date.now();
+          void runScans([{ root: updated, subdir: null }]);
+          return json(updated);
+        } catch (err) {
+          return bad((err as Error).message);
+        }
+      }),
       DELETE: guard((req) => {
         const id = idParam(req.params.id);
         if (!id) return bad("bad id");
@@ -670,7 +727,7 @@ const server = Bun.serve({
     "/api/reveal/:id": {
       POST: guard((req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p) return bad("not found", 404);
         const cmd =
           process.platform === "darwin"
@@ -689,12 +746,12 @@ const server = Bun.serve({
         const size = req.params.size as ThumbSize;
         const id = idParam(req.params.id);
         if (!THUMB_SIZES.includes(size) || !id) return bad("bad request");
-        const photo = getPhoto(id);
+        const photo = visiblePhoto(id, photoVisibility(req));
         if (!photo) return bad("not found", 404);
         // ?original: as in the file, without the edits (what the editor starts from).
         const p = new URL(req.url).searchParams.has("original") ? { ...photo, edits: null } : photo;
         // Revalidated on every use: a 304 costs nothing locally, and ids aren't stable forever.
-        const headers = { etag: thumbETag(p, size), "cache-control": "private, no-cache" };
+        const headers = { etag: thumbETag(p, size), "cache-control": p.is_private ? "no-store" : "private, no-cache" };
         if (req.headers.get("if-none-match") === headers.etag && hasThumb(p, size)) {
           return new Response(null, { status: 304, headers });
         }
@@ -708,10 +765,10 @@ const server = Bun.serve({
     "/original/:id": {
       GET: guard((req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p || p.missing) return bad("not found", 404);
         const res = serveFile(p.path, p.ext, req);
-        res.headers.set("cache-control", "private, no-cache");
+        res.headers.set("cache-control", p.is_private ? "no-store" : "private, no-cache");
         return res;
       }),
     },
@@ -720,10 +777,15 @@ const server = Bun.serve({
     "/edited/:id": {
       GET: guard(async (req) => {
         const id = idParam(req.params.id);
-        const p = id && getPhoto(id);
+        const p = id && visiblePhoto(id, photoVisibility(req));
         if (!p || p.missing) return bad("not found", 404);
-        if (!p.edits) return Response.redirect(`/original/${p.id}`, 302);
-        const headers = { etag: thumbETag(p, "f"), "cache-control": "private, no-cache" };
+        if (!p.edits) {
+          return new Response(null, {
+            status: 302,
+            headers: { ...noStore, location: withPhotoVisibility(`/original/${p.id}`, photoVisibility(req)) },
+          });
+        }
+        const headers = { etag: thumbETag(p, "f"), "cache-control": p.is_private ? "no-store" : "private, no-cache" };
         if (req.headers.get("if-none-match") === headers.etag && hasThumb(p, "f")) {
           return new Response(null, { status: 304, headers });
         }

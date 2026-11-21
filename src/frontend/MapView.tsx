@@ -1,8 +1,9 @@
+import { usePhotoUrls } from "./photoVisibility";
 import { useEffect, useRef } from "react";
 import { Map as MlMap, Marker, NavigationControl, ScaleControl, type LngLatBoundsLike } from "maplibre-gl";
 import type { BBox, Points } from "./data";
 import type { Cluster } from "./clusterClient";
-import { nf, thumbUrl } from "./data";
+import { nf } from "./data";
 import { setMapTheme } from "./map";
 
 export interface MapViewProps {
@@ -14,7 +15,7 @@ export interface MapViewProps {
   highlight: number | null;
   onView(bbox: BBox, zoom: number): void;
   onClusterClick(c: Cluster): void;
-  onReady(map: MlMap): void;
+  onReady(map: MlMap | null): void;
 }
 
 /** Normalizes the visible bounds into a [-180, 180] bbox (west > east when crossing the antimeridian). */
@@ -43,6 +44,7 @@ interface Entry {
 }
 
 export function MapView(props: MapViewProps) {
+  const { thumbnail } = usePhotoUrls();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markers = useRef(new Map<string, Entry>());
@@ -92,6 +94,7 @@ export function MapView(props: MapViewProps) {
       if (timer) clearTimeout(timer);
       map.remove();
       mapRef.current = null;
+      cb.current.onReady(null);
       entries.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once; theme changes go through setStyle below.
@@ -142,7 +145,7 @@ export function MapView(props: MapViewProps) {
       entry.el.style.setProperty("--size", `${size}px`);
       entry.el.style.zIndex = String(Math.min(9999, c.count));
       const img = entry.el.firstChild as HTMLImageElement;
-      const src = thumbUrl(points.id[c.rep]!, "s");
+      const src = thumbnail(points.id[c.rep]!, "s");
       if (img.getAttribute("src") !== src) {
         entry.el.classList.remove("pm-marker--broken");
         img.src = src;
@@ -160,7 +163,7 @@ export function MapView(props: MapViewProps) {
         markers.current.delete(key);
       }
     }
-  }, [props.clusters, props.points]);
+  }, [props.clusters, props.points, thumbnail]);
 
   // Location ping for the hovered photo.
   useEffect(() => {

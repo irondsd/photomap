@@ -4,6 +4,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { renderSVG } from "uqr";
 import { DEFAULT_SYNC_DIR, SYNC_PORT } from "../config";
 import { getMeta, setMeta } from "../db";
+import { normalizeFolder } from "../scan/roots";
 import { dockerFolders, folderProblem, inDocker, syncDir, syncLayout } from "./folder";
 import { PROTOCOL_VERSION, type HelloResponse, type PairingPayload } from "./protocol";
 import { missingItems, parseManifest, parseUpload, receive, syncedCount, UploadError } from "./receive";
@@ -164,13 +165,21 @@ export function syncStatus() {
     ? { v: PROTOCOL_VERSION, url, token: pairingToken(), name: serverName() }
     : null;
   const qr = enabled && listener && payload ? renderSVG(JSON.stringify(payload), { border: 2 }) : null;
+  const folder = syncDir();
+  let indexedFolder: string | null = null;
+  try {
+    indexedFolder = normalizeFolder(folder);
+  } catch {
+    // The default destination may not exist until sync starts.
+  }
   return {
     enabled,
     listening: listener !== null,
     error: listenError,
     url,
     port: SYNC_PORT,
-    folder: syncDir(),
+    folder,
+    indexedFolder,
     layout: syncLayout(),
     folderError: folderProblem(),
     defaultFolder: DEFAULT_SYNC_DIR,

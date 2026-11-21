@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { DB_PATH } from "./config";
+import type { PhotoVisibility } from "./photo-visibility";
 
 export interface PhotoRow {
   id: number;
@@ -13,6 +14,7 @@ export interface PhotoRow {
   mtime: number;
   scan_gen: number;
   missing: number;
+  is_private: number;
   /** Wall-clock time where the photo was taken, as seconds since epoch read as UTC. */
   taken_local: number | null;
   /** Minutes east of UTC, when known. */
@@ -41,7 +43,7 @@ export interface PhotoRow {
   edits: string | null;
 }
 
-export type PhotoInsert = Omit<PhotoRow, "id" | "missing" | "indexed_at" | "edits">;
+export type PhotoInsert = Omit<PhotoRow, "id" | "missing" | "indexed_at" | "edits" | "is_private">;
 
 export interface RootRow {
   id: number;
@@ -158,6 +160,13 @@ if (version < 6) {
   })();
 }
 
+if (version < 7) {
+  db.transaction(() => {
+    db.run("ALTER TABLE photos ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0 CHECK (is_private IN (0, 1))");
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '7')");
+  })();
+}
+
 const PHOTO_COLS = [
   "root_id",
   "path",
@@ -192,17 +201,20 @@ const PHOTO_COLS = [
 ] as const satisfies readonly (keyof PhotoInsert)[];
 
 const upsertStmt = db.prepare(
-  `INSERT INTO photos (${PHOTO_COLS.join(", ")}, missing, indexed_at)
-   VALUES (${PHOTO_COLS.map((c) => "$" + c).join(", ")}, 0, $indexed_at)
+  `INSERT INTO photos (${PHOTO_COLS.join(", ")}, missing, indexed_at, is_private)
+   VALUES (${PHOTO_COLS.map((c) => "$" + c).join(", ")}, 0, $indexed_at, $is_private)
    ON CONFLICT(path) DO UPDATE SET
    ${PHOTO_COLS.filter((c) => c !== "path")
      .map((c) => `${c} = excluded.${c}`)
      .join(", ")},
-   missing = 0, indexed_at = excluded.indexed_at`,
+   missing = 0, indexed_at = excluded.indexed_at, is_private = max(photos.is_private, excluded.is_private)`,
 );
 
-export function upsertPhoto(p: PhotoInsert) {
-  const params: Record<string, string | number | null> = { $indexed_at: Date.now() };
+export function upsertPhoto(p: PhotoInsert, privateOnInsert = false) {
+  const params: Record<string, string | number | null> = {
+    $indexed_at: Date.now(),
+    $is_private: Number(privateOnInsert),
+  };
   for (const c of PHOTO_COLS) params["$" + c] = p[c] ?? null;
   upsertStmt.run(params);
 }
@@ -272,6 +284,16 @@ export const setRootScanned = (id: number) =>
 
 export const getPhoto = (id: number) => db.query<PhotoRow, [number]>(`SELECT * FROM photos WHERE id = ?`).get(id);
 
+export const setPhotosPrivate = db.transaction((ids: number[], makePrivate: boolean): number[] => {
+  const value = Number(makePrivate);
+  const update = db.query("UPDATE photos SET is_private = ? WHERE id = ? AND missing = 0 AND is_private <> ?");
+  return ids.filter((id) => update.run(value, id, value).changes > 0);
+});
+
+export function photoVisibilityFilter(visibility: PhotoVisibility, alias = "photos"): string {
+  return visibility === "all" ? "" : ` AND ${alias}.is_private = ${Number(visibility === "private")}`;
+}
+
 /** Stores (or with null, clears) a photo's edits. */
 export const setEdits = (id: number, edits: string | null) =>
   db.run(`UPDATE photos SET edits = ? WHERE id = ?`, [edits, id]);
@@ -288,30 +310,29 @@ export function allPoints() {
     .all();
 }
 
-export function stats() {
-  const one = <T>(sql: string) => db.query<T, []>(sql).get()!;
-  const all = <T>(sql: string) => db.query<T, []>(sql).all();
+export function stats(visibility: PhotoVisibility = "all") {
+  const scope = photoVisibilityFilter(visibility);
+  const available = `FROM photos WHERE missing = 0${scope}`;
+  const one = <T>(columns: string, tail = "") => db.query<T, []>(`SELECT ${columns} ${available} ${tail}`).get()!;
+  const all = <T>(columns: string, tail: string) => db.query<T, []>(`SELECT ${columns} ${available} ${tail}`).all();
   return {
-    total: one<{ n: number }>(`SELECT count(*) n FROM photos WHERE missing = 0`).n,
-    geotagged: one<{ n: number }>(`SELECT count(*) n FROM photos WHERE missing = 0 AND lat IS NOT NULL`).n,
-    missing: one<{ n: number }>(`SELECT count(*) n FROM photos WHERE missing = 1`).n,
-    errors: one<{ n: number }>(`SELECT count(*) n FROM photos WHERE missing = 0 AND error IS NOT NULL`).n,
-    range: one<{ min: number | null; max: number | null }>(
-      `SELECT min(taken_local) min, max(taken_local) max FROM photos WHERE missing = 0`,
-    ),
-    kinds: all<{ kind: string; n: number }>(
-      `SELECT kind, count(*) n FROM photos WHERE missing = 0 GROUP BY kind ORDER BY n DESC`,
-    ),
+    total: one<{ n: number }>("count(*) n").n,
+    geotagged: one<{ n: number }>("count(*) n", "AND lat IS NOT NULL").n,
+    missing: db.query<{ n: number }, []>(`SELECT count(*) n FROM photos WHERE missing = 1${scope}`).get()!.n,
+    errors: one<{ n: number }>("count(*) n", "AND error IS NOT NULL").n,
+    range: one<{ min: number | null; max: number | null }>("min(taken_local) min, max(taken_local) max"),
+    kinds: all<{ kind: string; n: number }>("kind, count(*) n", "GROUP BY kind ORDER BY n DESC"),
     timeSources: all<{ source: string | null; n: number }>(
-      `SELECT time_source source, count(*) n FROM photos WHERE missing = 0 GROUP BY time_source ORDER BY n DESC`,
+      "time_source source, count(*) n",
+      "GROUP BY time_source ORDER BY n DESC",
     ),
     countries: all<{ code: string; name: string; n: number }>(
-      `SELECT country_code code, country name, count(*) n FROM photos
-       WHERE missing = 0 AND country_code IS NOT NULL GROUP BY country_code ORDER BY n DESC`,
+      "country_code code, country name, count(*) n",
+      "AND country_code IS NOT NULL GROUP BY country_code ORDER BY n DESC",
     ),
     cameras: all<{ make: string | null; model: string; n: number }>(
-      `SELECT make, model, count(*) n FROM photos
-       WHERE missing = 0 AND model IS NOT NULL GROUP BY make, model ORDER BY n DESC LIMIT 20`,
+      "make, model, count(*) n",
+      "AND model IS NOT NULL GROUP BY make, model ORDER BY n DESC LIMIT 20",
     ).map((c) => ({ model: cameraName(c.make, c.model), n: c.n })),
   };
 }

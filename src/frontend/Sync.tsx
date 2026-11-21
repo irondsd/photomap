@@ -8,6 +8,7 @@ interface SyncStatus {
   url: string | null;
   port: number;
   folder: string;
+  indexedFolder: string | null;
   layout: "month" | "flat";
   /** Why files can't be saved to the folder (only possible in Docker). */
   folderError: string | null;
@@ -148,9 +149,9 @@ function SyncFolder({ status, onChange }: { status: SyncStatus; onChange(s: Sync
   );
 }
 
-/** The Library's phone sync section: a switch, and the code the Photomap Sync app scans. */
-export function SyncSection({ onReceived }: { onReceived(): void }) {
+export function useSyncStatus(onReceived: () => void) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const received = useRef(onReceived);
   received.current = onReceived;
@@ -163,8 +164,9 @@ export function SyncSection({ onReceived }: { onReceived(): void }) {
           if (files !== null && s.files !== files) received.current();
           files = s.files;
           setStatus(s);
+          setLoadError(null);
         })
-        .catch((err) => setError((err as Error).message));
+        .catch((err) => setLoadError((err as Error).message));
     load();
     // Count the files arriving while the drawer is open.
     const t = setInterval(load, 4000);
@@ -179,16 +181,21 @@ export function SyncSection({ onReceived }: { onReceived(): void }) {
       })
       .catch((err) => setError((err as Error).message));
 
+  return { status, error: error ?? loadError, setStatus, act };
+}
+
+/** The Library's phone sync section: a switch, and the code the Photomap Sync app scans. */
+export function SyncSection({ sync }: { sync: ReturnType<typeof useSyncStatus> }) {
+  const { status, error, setStatus, act } = sync;
   const reset = () => {
     if (!confirm("Unpair every phone? Each one will need to scan the new code before it can sync again.")) return;
     void act("/api/sync/reset");
   };
 
-  if (!status) return null;
+  if (!status) return <p className={error ? "error" : "dim"}>{error ?? "Loading phone sync settings…"}</p>;
 
   return (
     <section>
-      <h4>Phone sync</h4>
       <p className="dim small">
         The Photomap Sync app sends your phone's photos and videos here over wifi, with their locations.
       </p>
@@ -229,16 +236,18 @@ export function SyncSection({ onReceived }: { onReceived(): void }) {
               <span className="mono">http://192.168.1.20:{status.port}</span> and restart.
             </div>
           )}
-          <p className="dim small">
-            {status.files > 0
-              ? `${nf.format(status.files)} ${status.files === 1 ? "file" : "files"} received, last ${new Date(status.last!).toLocaleString()}`
-              : "Nothing received yet."}{" "}
-            <button className="btn btn-small btn-ghost" onClick={reset}>
-              Unpair all phones
-            </button>
-          </p>
         </>
       )}
+      <p className="dim small">
+        {status.files > 0
+          ? `${nf.format(status.files)} ${status.files === 1 ? "file" : "files"} received, last ${new Date(status.last!).toLocaleString()}`
+          : "Nothing received yet."}{" "}
+        {status.enabled && status.listening && (
+          <button className="btn btn-small btn-ghost" onClick={reset}>
+            Unpair all phones
+          </button>
+        )}
+      </p>
     </section>
   );
 }

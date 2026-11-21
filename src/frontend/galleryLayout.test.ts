@@ -21,6 +21,7 @@ function points(items: [number, number, number?][]): Points {
     source: new Uint8Array(n),
     precision: new Uint8Array(n),
     dateManual: new Uint8Array(n),
+    isPrivate: new Uint8Array(n),
   };
 }
 

@@ -1,5 +1,5 @@
 import { resolve, relative, sep } from "node:path";
-import { statSync, realpathSync } from "node:fs";
+import { existsSync, statSync, realpathSync } from "node:fs";
 import { addRoot, db, getRoots, removeRoot, type RootRow } from "../db";
 
 /** What to scan: a registered root, optionally only one subfolder of it. */
@@ -54,6 +54,30 @@ export function registerTarget(input: string): ScanTarget {
     })(),
     subdir: null,
   };
+}
+
+/** Relinks a moved library folder, keeping the IDs that albums and edits refer to. */
+export function relinkRoot(root: RootRow, input: string): RootRow {
+  const path = normalizeFolder(input);
+  if (path === root.path) return root;
+  if (existsSync(root.path)) {
+    throw new Error("The original folder still exists. Move it first, or use Add & scan to index another folder.");
+  }
+  const prefix = path.endsWith(sep) ? path : path + sep;
+  const overlaps = getRoots().some((r) => {
+    const existingPrefix = r.path.endsWith(sep) ? r.path : r.path + sep;
+    return r.id !== root.id && (path === r.path || r.path.startsWith(prefix) || path.startsWith(existingPrefix));
+  });
+  if (overlaps) throw new Error("The new location overlaps a folder already in the library.");
+  return db.transaction(() => {
+    db.run("UPDATE roots SET path = ?, last_scan_at = NULL WHERE id = ?", [path, root.id]);
+    db.run("UPDATE photos SET path = ? || substr(path, length(?) + 1) WHERE root_id = ?", [
+      prefix,
+      root.path + sep,
+      root.id,
+    ]);
+    return { ...root, path, last_scan_at: null };
+  })();
 }
 
 /**

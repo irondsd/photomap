@@ -9,11 +9,14 @@ import { Viewer } from "./Viewer";
 import { AddFolder, Library, ScanProgress, type ScanStatus, type Stats } from "./Library";
 import { Gallery } from "./Gallery";
 import { albumRequest, AlbumEditDialog, AlbumHeader, AlbumList, AlbumPicker } from "./AlbumViews";
-import { IconButton } from "./Icons";
+import { Icon, IconButton } from "./Icons";
 import { afterOverlayClose } from "./history";
 import type { AlbumCatalog, AlbumSummary } from "../albums";
+import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
+import { HidePrivateContext, PhotoVisibilityContext } from "./photoVisibility";
 
 type Mode = "map" | "gallery" | "albums";
+const PRIVATE_ALBUM = -1;
 interface Destination {
   mode: Mode;
   album: number | null;
@@ -27,16 +30,17 @@ interface HashState {
   t: Range | null;
 }
 
-function readHash(): HashState {
+function readHash(allowPrivate = false): HashState {
   const q = new URLSearchParams(location.hash.slice(1));
   const m = q.get("map")?.split(",").map(Number);
   const t = q.get("t")?.split(",").map(Number);
   const v = q.get("view");
   const rawAlbum = q.get("album");
-  const album = rawAlbum == null ? NaN : Number(rawAlbum);
+  const parsedAlbum = rawAlbum ? Number(rawAlbum) : NaN;
+  const album = Number.isSafeInteger(parsedAlbum) && parsedAlbum >= 0 ? parsedAlbum : null;
   return {
     mode: v === "gallery" || v === "map" || v === "albums" ? v : null,
-    album: v !== "gallery" && rawAlbum && Number.isSafeInteger(album) && album >= 0 ? album : null,
+    album: v === "albums" && rawAlbum === "private" && allowPrivate ? PRIVATE_ALBUM : v === "gallery" ? null : album,
     map: m && m.length === 3 && m.every(Number.isFinite) ? { center: [m[1]!, m[0]!], zoom: m[2]! } : null,
     t: t && t.length === 2 && t.every(Number.isFinite) && t[0]! < t[1]! ? [t[0]!, t[1]!] : null,
   };
@@ -45,7 +49,7 @@ function readHash(): HashState {
 function viewHash({ mode, album }: Destination, map: MlMap | null, t: Range | null) {
   const q = new URLSearchParams();
   q.set("view", mode);
-  if (album != null) q.set("album", String(album));
+  if (album != null) q.set("album", album === PRIVATE_ALBUM ? "private" : String(album));
   if (map) {
     const c = map.getCenter();
     q.set("map", `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom().toFixed(2)}`);
@@ -211,11 +215,23 @@ export function App() {
     album: initialHash.album,
   }));
   const { mode, album: albumId } = destination;
+  const privateOpen = mode === "albums" && albumId === PRIVATE_ALBUM;
+  const privateEntry = useRef(false);
+  const [showPrivate, setShowPrivate] = useState(false);
+  const visibility: PhotoVisibility = privateOpen ? "private" : showPrivate ? "all" : "public";
+  const [privacyRevision, setPrivacyRevision] = useState(0);
+  const dataKey = `${visibility}:${privacyRevision}`;
+  const currentDataKey = useRef(dataKey);
+  useLayoutEffect(() => {
+    currentDataKey.current = dataKey;
+  }, [dataKey]);
   // Each view is built the first time it's shown, then kept (map position, gallery scroll).
   // A map created while hidden has no size and would fit its bounds to nothing.
   const [galleryMounted, setGalleryMounted] = useState(mode === "gallery");
+  const galleryScroll = useRef(0);
   const [mapMounted, setMapMounted] = useState(mode === "map");
   const activate = useCallback((next: Destination) => {
+    privateEntry.current = next.mode === "albums" && next.album === PRIVATE_ALBUM;
     setDestination((current) => (current.mode === next.mode && current.album === next.album ? current : next));
     const m = next.mode;
     if (m === "gallery") setGalleryMounted(true);
@@ -226,8 +242,11 @@ export function App() {
       // Storage can be unavailable (private mode, blocked); the view just won't be remembered.
     }
   }, []);
-  const [points, setPoints] = useState<Points | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [indexData, setIndexData] = useState<{ key: string; points: Points; stats: Stats } | null>(null);
+  const points = indexData?.key === dataKey ? indexData.points : null;
+  const stats = indexData?.key === dataKey ? indexData.stats : null;
+  const [indexError, setIndexError] = useState<{ key: string; text: string } | null>(null);
+  const refreshSequence = useRef(0);
   const [scan, setScan] = useState<ScanStatus | null>(null);
   const [kinds, setKinds] = useState<number>(ALL_KINDS);
   const [selection, setSelection] = useState<Range | null>(initialHash.t);
@@ -235,17 +254,26 @@ export function App() {
   const [clusterQuery, setClusterQuery] = useState<{
     result: ClusterResult;
     membership: Uint8Array | null;
+    points: Points;
   } | null>(null);
   const [followMap, setFollowMap] = useState(false);
   const [tab, setTab] = useState<SidebarTab>("map");
   // Photo ids, so the viewer stays on the same photo when the points are reloaded.
   const [viewer, setViewer] = useState<{ ids: Uint32Array; index: number } | null>(null);
-  const [hover, setHover] = useState<number | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ points: Points; index: number } | null>(null);
+  const hover = hoverPoint?.points === points ? hoverPoint.index : null;
+  const setHover = useCallback(
+    (index: number | null) => {
+      setHoverPoint(index != null && points ? { points, index } : null);
+    },
+    [points],
+  );
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [catalog, setCatalog] = useState<AlbumCatalog | null>(null);
+  const [albumCatalog, setAlbumCatalog] = useState<{ key: string; value: AlbumCatalog } | null>(null);
+  const catalog = albumCatalog?.key === dataKey ? albumCatalog.value : null;
   const [catalogError, setCatalogError] = useState("");
   const [albumsRevision, setAlbumsRevision] = useState(0);
-  const [albumMembers, setAlbumMembers] = useState<{ album: number; ids: number[] } | null>(null);
+  const [albumMembers, setAlbumMembers] = useState<{ key: string; album: number; ids: number[] } | null>(null);
   const [membersError, setMembersError] = useState<{ album: number; text: string } | null>(null);
   const [albumPicker, setAlbumPicker] = useState<{ ids: number[]; onDone?: () => void } | null>(null);
   const [albumEdit, setAlbumEdit] = useState<{ album: AlbumSummary; remove: boolean } | null>(null);
@@ -256,12 +284,19 @@ export function App() {
     error: string;
   } | null>(null);
   const [albumNotice, setAlbumNotice] = useState("");
+  const [privacyNotice, setPrivacyNotice] = useState<{
+    text: string;
+    undo?: { ids: number[]; makePrivate: boolean };
+  } | null>(null);
+  const [undoingPrivacy, setUndoingPrivacy] = useState(false);
+  const privacyChannel = useRef<BroadcastChannel | null>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const mapPosition = useRef<HashState["map"]>(null);
   const pendingAlbumFit = useRef(mode === "map" && !initialHash.map ? albumId : null);
   const [photoFocus, setPhotoFocus] = useState<{ center: [number, number]; id: number } | null>(null);
   const clientRef = useRef<ClusterClient | null>(null);
-  const clusterMembership = useRef<Uint8Array | null>(null);
-  const loadedVersion = useRef<string | null>(null);
+  const clusterFilter = useRef<{ points: Points; membership: Uint8Array | null } | null>(null);
+  const loadedVersion = useRef<{ key: string; value: string } | null>(null);
 
   const navigate = useCallback(
     (m: Mode, album: number | null = null, range = selection, replace = false) => {
@@ -283,15 +318,40 @@ export function App() {
     else navigate("albums", null, selection, true);
   };
 
+  const hidePrivate = useCallback(() => {
+    setShowPrivate(false);
+    if (privateEntry.current) activate({ mode: "albums", album: null });
+    setViewer(null);
+    setAlbumPicker(null);
+    setAlbumEdit(null);
+    setLibraryOpen(false);
+    setCoverDraft(null);
+    setPhotoFocus(null);
+    setAlbumNotice("");
+    setPrivacyNotice(null);
+  }, [activate]);
+
   // ------------------------------------------------------------ data loading
   const refresh = useCallback(async () => {
-    const s = (await (await fetch("/api/stats")).json()) as Stats;
-    setStats(s);
-    if (loadedVersion.current !== s.version) {
-      loadedVersion.current = s.version;
-      setPoints(await loadPoints());
+    if (currentDataKey.current !== dataKey) return;
+    const sequence = ++refreshSequence.current;
+    const current = () => currentDataKey.current === dataKey && refreshSequence.current === sequence;
+    try {
+      const response = await fetch(withPhotoVisibility("/api/stats", visibility));
+      if (!response.ok) throw new Error("Couldn't load photos. Try again.");
+      const nextStats = (await response.json()) as Stats;
+      if (!current()) return;
+      if (loadedVersion.current?.key !== dataKey || loadedVersion.current.value !== nextStats.version) {
+        const nextPoints = await loadPoints(visibility);
+        if (!current()) return;
+        loadedVersion.current = { key: dataKey, value: nextStats.version };
+        setIndexData({ key: dataKey, stats: nextStats, points: nextPoints });
+      }
+      setIndexError(null);
+    } catch (error) {
+      if (current()) setIndexError({ key: dataKey, text: (error as Error).message });
     }
-  }, []);
+  }, [dataKey, visibility]);
 
   useEffect(() => {
     refresh();
@@ -301,29 +361,37 @@ export function App() {
   useEffect(() => {
     const request = new AbortController();
     setCatalogError("");
-    albumRequest<AlbumCatalog>("albums", "GET", undefined, request.signal)
-      .then(setCatalog)
+    albumRequest<AlbumCatalog>(withPhotoVisibility("albums", visibility), "GET", undefined, request.signal)
+      .then((value) => {
+        if (!request.signal.aborted) setAlbumCatalog({ key: dataKey, value });
+      })
       .catch((err: Error) => {
         if (!request.signal.aborted) setCatalogError(err.message);
       });
     return () => request.abort();
-  }, [points, albumsRevision]);
+  }, [points, albumsRevision, dataKey, visibility]);
 
   useEffect(() => {
-    if (albumId == null || albumId === 0) return;
+    if (albumId == null || albumId <= 0) return;
     const request = new AbortController();
     setMembersError(null);
-    albumRequest<number[]>(`albums/${albumId}`, "GET", undefined, request.signal)
-      .then((ids) => setAlbumMembers({ album: albumId, ids }))
+    albumRequest<number[]>(withPhotoVisibility(`albums/${albumId}`, visibility), "GET", undefined, request.signal)
+      .then((ids) => {
+        if (!request.signal.aborted) setAlbumMembers({ key: dataKey, album: albumId, ids });
+      })
       .catch((err: Error) => {
         if (!request.signal.aborted) setMembersError({ album: albumId, text: err.message });
       });
     return () => request.abort();
-  }, [albumId, points, albumsRevision]);
+  }, [albumId, points, albumsRevision, dataKey, visibility]);
 
   const activeAlbum = albumId === 0 ? catalog?.favorites : catalog?.albums.find((a) => a.id === albumId);
   const albumIds =
-    albumId === 0 ? catalog?.favorites.ids : albumMembers?.album === albumId ? albumMembers?.ids : undefined;
+    albumId === 0
+      ? catalog?.favorites.ids
+      : albumMembers?.key === dataKey && albumMembers.album === albumId
+        ? albumMembers.ids
+        : undefined;
   const favorites = useMemo(() => new Set(catalog?.favorites.ids), [catalog?.favorites.ids]);
   const idIndex = useMemo(() => {
     const m = new Map<number, number>();
@@ -359,12 +427,18 @@ export function App() {
     setCoverDraft({ ...pickingCover, saving: true, error: "" });
     try {
       await albumRequest(`albums/${albumId}/cover`, "PUT", { photoId: candidate });
-      setCatalog(
-        (current) =>
-          current && {
-            ...current,
-            albums: current.albums.map((album) => (album.id === albumId ? { ...album, coverId: candidate } : album)),
-          },
+      setAlbumCatalog((current) =>
+        current?.key === dataKey
+          ? {
+              ...current,
+              value: {
+                ...current.value,
+                albums: current.value.albums.map((album) =>
+                  album.id === albumId ? { ...album, coverId: candidate } : album,
+                ),
+              },
+            }
+          : current,
       );
       setCoverDraft((draft) => (draft?.albumId === albumId && draft.saving ? null : draft));
       setAlbumNotice("Album cover updated");
@@ -378,16 +452,17 @@ export function App() {
     }
   };
   const albumMask = useMemo(() => {
-    if (!points || albumId == null) return null;
+    if (!points || albumId == null || privateOpen) return null;
     const mask = new Uint8Array(points.n);
     for (const id of albumIds ?? []) {
       const i = idIndex.get(id);
       if (i != null) mask[i] = 1;
     }
     return mask;
-  }, [albumId, albumIds, idIndex, points]);
+  }, [albumId, albumIds, idIndex, points, privateOpen]);
   const mapAlbumMask = mode === "map" ? albumMask : null;
-  const result = clusterQuery?.membership === mapAlbumMask ? clusterQuery.result : EMPTY_RESULT;
+  const result =
+    clusterQuery?.points === points && clusterQuery.membership === mapAlbumMask ? clusterQuery.result : EMPTY_RESULT;
   const albumBounds = useMemo(
     () => (points && albumMask && albumIds ? boundsOf(points, null, ALL_KINDS, albumMask) : null),
     [points, albumMask, albumIds],
@@ -407,14 +482,14 @@ export function App() {
     const loop = async () => {
       const s = await pollScan().catch(() => null);
       if (stop) return;
-      if (s && (s.running || s.version !== loadedVersion.current)) {
+      if (s && (s.running || s.version !== loadedVersion.current?.value)) {
         // Refresh the map periodically during long scans so photos appear as they're indexed.
         if (!s.running || performance.now() - lastRefresh > 8000) {
           lastRefresh = performance.now();
           await refresh();
         }
       }
-      timer = setTimeout(loop, s?.running ? 1000 : 4000);
+      if (!stop) timer = setTimeout(loop, s?.running ? 1000 : 4000);
     };
     loop();
     return () => {
@@ -425,7 +500,9 @@ export function App() {
 
   // ------------------------------------------------------------ clustering
   useEffect(() => {
-    const client = new ClusterClient((result) => setClusterQuery({ result, membership: clusterMembership.current }));
+    const client = new ClusterClient((result) => {
+      if (clusterFilter.current) setClusterQuery({ result, ...clusterFilter.current });
+    });
     clientRef.current = client;
     return () => client.dispose();
   }, []);
@@ -436,12 +513,14 @@ export function App() {
   }, [points]);
 
   useEffect(() => {
+    clusterFilter.current = points ? { points, membership: mapAlbumMask } : null;
     if (!points) return;
-    clusterMembership.current = mapAlbumMask;
     clientRef.current!.filter(selection, kinds, mapAlbumMask);
   }, [points, selection, kinds, mapAlbumMask]);
 
   const onView = useCallback((bbox: BBox, zoom: number) => {
+    const center = mapRef.current?.getCenter();
+    if (center) mapPosition.current = { center: [center.lng, center.lat], zoom };
     setView({ bbox, zoom });
     clientRef.current?.query(bbox, zoom);
   }, []);
@@ -473,10 +552,13 @@ export function App() {
   // ------------------------------------------------------------ URL sync
   useEffect(() => {
     const onHash = () => {
-      const h = readHash();
+      const h = readHash(privateEntry.current);
       activate({ mode: h.mode ?? (h.album == null ? savedMode() : "map"), album: h.album });
       setSelection(h.t);
-      if (h.map) mapRef.current?.jumpTo({ center: h.map.center, zoom: h.map.zoom });
+      if (h.map) {
+        mapPosition.current = h.map;
+        mapRef.current?.jumpTo({ center: h.map.center, zoom: h.map.zoom });
+      }
       pendingAlbumFit.current = h.mode === "map" && !h.map ? h.album : null;
     };
     window.addEventListener("hashchange", onHash);
@@ -508,7 +590,7 @@ export function App() {
         const i = indexOf(photoFocus.id);
         if (i != null) {
           setHover(i);
-          setTimeout(() => setHover((h) => (h === i ? null : h)), 3500);
+          setTimeout(() => setHoverPoint((h) => (h?.points === points && h.index === i ? null : h)), 3500);
         }
       } else if (pendingAlbumFit.current != null && pendingAlbumFit.current === albumId && albumBounds) {
         pendingAlbumFit.current = null;
@@ -516,7 +598,7 @@ export function App() {
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [mode, mapHasView, albumId, albumBounds, indexOf, photoFocus]);
+  }, [mode, mapHasView, albumId, albumBounds, indexOf, photoFocus, points, setHover]);
 
   // ------------------------------------------------------------ actions
   const fitToPhotos = useCallback(() => {
@@ -533,18 +615,22 @@ export function App() {
   };
 
   const saveFavorite = async (id: number, favorite: boolean) => {
-    await albumRequest(`photos/${id}/favorite`, "PUT", { favorite });
-    setCatalog(
-      (current) =>
-        current && {
-          ...current,
-          favorites: {
-            ...current.favorites,
-            ids: favorite
-              ? [...new Set([...current.favorites.ids, id])]
-              : current.favorites.ids.filter((item) => item !== id),
-          },
-        },
+    await albumRequest(withPhotoVisibility(`photos/${id}/favorite`, visibility), "PUT", { favorite });
+    setAlbumCatalog((current) =>
+      current?.key === dataKey
+        ? {
+            ...current,
+            value: {
+              ...current.value,
+              favorites: {
+                ...current.value.favorites,
+                ids: favorite
+                  ? [...new Set([...current.value.favorites.ids, id])]
+                  : current.value.favorites.ids.filter((item) => item !== id),
+              },
+            },
+          }
+        : current,
     );
     albumsChanged();
   };
@@ -553,7 +639,9 @@ export function App() {
     await albumRequest(`albums/${albumId}/members`, "POST", { ids, remove: true });
     const removed = new Set(ids);
     setAlbumMembers((current) =>
-      current?.album === albumId ? { ...current, ids: current.ids.filter((id) => !removed.has(id)) } : current,
+      current?.key === dataKey && current.album === albumId
+        ? { ...current, ids: current.ids.filter((id) => !removed.has(id)) }
+        : current,
     );
     albumsChanged();
   };
@@ -563,6 +651,54 @@ export function App() {
     const timer = setTimeout(() => setAlbumNotice(""), 3500);
     return () => clearTimeout(timer);
   }, [albumNotice]);
+
+  const invalidatePrivacy = useCallback(() => {
+    setPrivacyRevision((revision) => revision + 1);
+    setViewer(null);
+    setAlbumPicker(null);
+    setCoverDraft(null);
+    setPhotoFocus(null);
+  }, []);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("photomap-photo-privacy");
+    privacyChannel.current = channel;
+    channel.onmessage = invalidatePrivacy;
+    return () => {
+      privacyChannel.current = null;
+      channel.close();
+    };
+  }, [invalidatePrivacy]);
+
+  const changePrivacy = async (ids: number[], makePrivate: boolean, undo = false) => {
+    const { changed } = await albumRequest<{ changed: number[] }>("photos/privacy", "PUT", {
+      ids,
+      private: makePrivate,
+    });
+    if (changed.length) privacyChannel.current?.postMessage("changed");
+    if (visibility === "all" && currentDataKey.current === dataKey) {
+      // The visible set stays the same in this mode. Refresh the flags in place.
+      await refresh();
+    } else {
+      invalidatePrivacy();
+    }
+    const items = changed.length === 1 ? "1 item" : `${changed.length} items`;
+    setPrivacyNotice({
+      text: !changed.length
+        ? "These items are already up to date."
+        : makePrivate
+          ? `Made ${items} private`
+          : `Removed ${items} from Private`,
+      undo: !undo && changed.length ? { ids: changed, makePrivate: !makePrivate } : undefined,
+    });
+  };
+
+  useEffect(() => {
+    if (!privacyNotice || undoingPrivacy) return;
+    const timer = setTimeout(() => setPrivacyNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [privacyNotice, undoingPrivacy]);
 
   /** Opens the viewer on a list of point indices. */
   const openViewer = useCallback(
@@ -581,10 +717,11 @@ export function App() {
         return;
       }
       const r = await clientRef.current!.expand(c.cid);
+      if (currentDataKey.current !== dataKey || clusterFilter.current?.points !== points) return;
       if (r.leaves) openViewer(r.leaves, 0);
       else mapRef.current?.easeTo({ center: [c.lon, c.lat], zoom: Math.min(r.zoom + 0.2, 18), duration: 500 });
     },
-    [result.visible, openViewer],
+    [result.visible, openViewer, dataKey, points],
   );
 
   const showOnMap = useCallback(
@@ -596,7 +733,7 @@ export function App() {
         setTab("map");
         pendingAlbumFit.current = null;
         setPhotoFocus({ center, id });
-        navigate("map", albumId);
+        navigate("map", albumId === PRIVATE_ALBUM ? null : albumId);
       });
       setViewer(null);
     },
@@ -614,10 +751,7 @@ export function App() {
   }, [mode, viewer, libraryOpen, selection]);
 
   // ------------------------------------------------------------ render
-  const isEmpty = stats != null && stats.total === 0;
-  useEffect(() => {
-    if (isEmpty && mode === "gallery") navigate("map", null, selection, true);
-  }, [isEmpty, mode, navigate, selection]);
+  const isEmpty = stats != null && stats.total === 0 && !privateOpen;
   const initialBounds = useMemo(
     () => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first load positions the map.
@@ -631,8 +765,18 @@ export function App() {
     (membersError?.album === albumId ? membersError?.text : "") ||
     (catalog && albumId != null && !activeAlbum ? "This album is no longer available." : "");
 
-  return (
+  const app = (
     <div className="app">
+      {showPrivate && (
+        <div className="private-visibility-bar">
+          <span role="status">
+            <Icon name="lock" /> Private photos visible
+          </span>
+          <button className="btn btn-small" onClick={hidePrivate}>
+            Hide now
+          </button>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden />
@@ -647,7 +791,7 @@ export function App() {
           >
             Map
           </button>
-          <button aria-pressed={mode === "gallery"} disabled={isEmpty} onClick={() => navigate("gallery")}>
+          <button aria-pressed={mode === "gallery"} onClick={() => navigate("gallery")}>
             Gallery
           </button>
           <button
@@ -684,14 +828,22 @@ export function App() {
       </header>
 
       <main className="main">
+        {indexError?.key === dataKey && !points && (
+          <div className="empty photo-load-error">
+            <p role="alert">{indexError.text}</p>
+            <button className="btn" onClick={refresh}>
+              Try again
+            </button>
+          </div>
+        )}
         <div className="map-layout" hidden={mode !== "map"}>
           <div className="map-col">
             <div className="map-wrap">
-              {points && mapMounted && (
+              {points && mapMounted && !privateOpen && (
                 <MapView
                   points={points}
                   clusters={result.clusters}
-                  initial={initialHash.map}
+                  initial={mapPosition.current ?? initialHash.map}
                   initialBounds={initialBounds}
                   dark={dark}
                   highlight={hover}
@@ -765,18 +917,20 @@ export function App() {
             />
           )}
         </div>
-        {galleryMounted && points && (
+        {galleryMounted && points && !privateOpen && (
           <div className="gallery-layout" hidden={mode !== "gallery"}>
             <Gallery
               points={points}
               kinds={kinds}
               active={mode === "gallery"}
+              scrollPosition={galleryScroll}
               paused={paused}
               indexOf={indexOf}
               onOpen={openViewer}
               onLocationsChanged={refresh}
               favorites={favorites}
               onAddToAlbum={openAlbumPicker}
+              onChangePrivacy={changePrivacy}
             />
           </div>
         )}
@@ -787,6 +941,10 @@ export function App() {
               albums={[catalog.favorites, ...catalog.albums]}
               onOpen={(id) => navigate("albums", id)}
               onCreate={() => openAlbumPicker([])}
+              onOpenPrivate={() => {
+                setKinds(ALL_KINDS);
+                navigate("albums", PRIVATE_ALBUM);
+              }}
             />
           ) : (
             <div className="empty">
@@ -802,7 +960,42 @@ export function App() {
               )}
             </div>
           ))}
-        {albumId != null && (
+        {privateOpen && (
+          <div className="album-detail">
+            <header className="album-heading album-detail-heading">
+              <div className="album-title">
+                <IconButton name="back" label="All albums" onClick={backToAlbums} />
+                <div>
+                  <h1>Private</h1>
+                  <p className="dim">Hidden during normal browsing</p>
+                </div>
+              </div>
+              {!showPrivate && (
+                <button className="btn album-action" onClick={() => setShowPrivate(true)}>
+                  <Icon name="lock" /> Show private photos
+                </button>
+              )}
+            </header>
+            {points ? (
+              <Gallery
+                points={points}
+                kinds={kinds}
+                active
+                paused={paused}
+                indexOf={indexOf}
+                onOpen={openViewer}
+                onLocationsChanged={refresh}
+                favorites={favorites}
+                onAddToAlbum={openAlbumPicker}
+                onChangePrivacy={changePrivacy}
+                emptyMessage={points.n ? undefined : "Use Make private on a photo or selection to add it here."}
+              />
+            ) : (
+              indexError?.key !== dataKey && <div className="empty">Loading private photos…</div>
+            )}
+          </div>
+        )}
+        {albumId != null && !privateOpen && (
           <div className="album-detail" hidden={mode !== "albums"} key={albumId}>
             {activeAlbum && (
               <AlbumHeader
@@ -859,6 +1052,7 @@ export function App() {
                 membership={albumMask}
                 oldestFirst={albumId !== 0}
                 onAddToAlbum={openAlbumPicker}
+                onChangePrivacy={changePrivacy}
                 onRemoveFromAlbum={albumId === 0 ? undefined : removeFromAlbum}
                 coverPicker={
                   pickingCover
@@ -885,7 +1079,7 @@ export function App() {
         )}
       </main>
 
-      {viewer && points && (
+      {viewer && points && indexOf(viewer.ids[viewer.index]!) != null && (
         <Viewer
           points={points}
           ids={viewer.ids}
@@ -893,13 +1087,14 @@ export function App() {
           indexOf={indexOf}
           onIndex={(index) => setViewer((v) => v && { ...v, index })}
           onClose={() => setViewer(null)}
-          onShowOnMap={showOnMap}
+          onShowOnMap={!privateOpen || showPrivate ? showOnMap : undefined}
           onLocationChange={refresh}
           favorites={favorites}
           albumsRevision={albumsRevision}
           albumPickerOpen={albumPicker != null}
           onAddToAlbum={(id) => openAlbumPicker([id])}
           onFavorite={saveFavorite}
+          onChangePrivacy={changePrivacy}
           onDeleted={(id) => {
             // On to the next photo (the previous one at the end); closed when none are left.
             setViewer((v) => {
@@ -940,6 +1135,30 @@ export function App() {
           {albumNotice}
         </div>
       )}
+      {privacyNotice && (
+        <div className="album-notice privacy-notice">
+          <span role="status">{privacyNotice.text}</span>
+          {privacyNotice.undo && (
+            <button
+              className="btn btn-small"
+              disabled={undoingPrivacy}
+              onClick={async () => {
+                const undo = privacyNotice.undo!;
+                setUndoingPrivacy(true);
+                try {
+                  await changePrivacy(undo.ids, undo.makePrivate, true);
+                } catch (error) {
+                  setPrivacyNotice({ ...privacyNotice, text: (error as Error).message });
+                } finally {
+                  setUndoingPrivacy(false);
+                }
+              }}
+            >
+              Undo
+            </button>
+          )}
+        </div>
+      )}
       {libraryOpen && (
         <Library
           stats={stats}
@@ -952,5 +1171,10 @@ export function App() {
         />
       )}
     </div>
+  );
+  return (
+    <PhotoVisibilityContext value={visibility}>
+      <HidePrivateContext value={showPrivate ? hidePrivate : null}>{app}</HidePrivateContext>
+    </PhotoVisibilityContext>
   );
 }

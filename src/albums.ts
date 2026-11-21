@@ -1,4 +1,5 @@
-import { db } from "./db";
+import { db, photoVisibilityFilter } from "./db";
+import type { PhotoVisibility } from "./photo-visibility";
 
 export interface AlbumDate {
   time: number;
@@ -34,7 +35,8 @@ interface Member {
 const memberDate = (m: Member): AlbumDate | null =>
   m.time == null ? null : { time: m.time, yearOnly: m.source === "folder" };
 
-export function albumCatalog(): AlbumCatalog {
+export function albumCatalog(visibility: PhotoVisibility = "public"): AlbumCatalog {
+  const scope = photoVisibilityFilter(visibility, "p");
   const albums = db
     .query<{ id: number; name: string; cover_photo_id: number | null }, []>(
       "SELECT id, name, cover_photo_id FROM albums",
@@ -47,10 +49,10 @@ export function albumCatalog(): AlbumCatalog {
     .query<Member, []>(
       `
     SELECT ap.album_id AS albumId, p.id, ${taken} AS time, p.time_source AS source
-    FROM album_photos ap JOIN photos p ON p.id = ap.photo_id WHERE p.missing = 0
+    FROM album_photos ap JOIN photos p ON p.id = ap.photo_id WHERE p.missing = 0${scope}
     UNION ALL
     SELECT 0, p.id, ${taken}, p.time_source
-    FROM favorites f JOIN photos p ON p.id = f.photo_id WHERE p.missing = 0
+    FROM favorites f JOIN photos p ON p.id = f.photo_id WHERE p.missing = 0${scope}
     ORDER BY 3, 2
   `,
     )
@@ -96,12 +98,12 @@ export function albumCatalog(): AlbumCatalog {
 export const getAlbum = (id: number) =>
   db.query<{ id: number; name: string }, [number]>("SELECT id, name FROM albums WHERE id = ?").get(id);
 
-export const albumPhotoIds = (id: number) =>
+export const albumPhotoIds = (id: number, visibility: PhotoVisibility = "public") =>
   db
     .query<{ id: number }, [number]>(
       `
     SELECT p.id FROM album_photos ap JOIN photos p ON p.id = ap.photo_id
-    WHERE ap.album_id = ? AND p.missing = 0
+    WHERE ap.album_id = ? AND p.missing = 0${photoVisibilityFilter(visibility, "p")}
   `,
     )
     .all(id)

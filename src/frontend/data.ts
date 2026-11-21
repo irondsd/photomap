@@ -1,3 +1,5 @@
+import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
+
 /** Column-oriented photo index, sorted by time ascending (undated at the end). */
 export interface Points {
   n: number;
@@ -19,6 +21,8 @@ export interface Points {
   precision: Uint8Array;
   /** 1 when the date was set by hand. */
   dateManual: Uint8Array;
+  /** 1 when the photo is private. */
+  isPrivate: Uint8Array;
 }
 
 export const PRECISION = { exact: 0, estimated: 1, year: 2, unknown: 3 } as const;
@@ -29,9 +33,11 @@ export const KIND = { photo: 0, raw: 1, video: 2 } as const;
 export const KIND_BIT = [1, 2, 4] as const;
 export const ALL_KINDS = 7;
 
-export async function loadPoints(): Promise<Points> {
+export async function loadPoints(visibility: PhotoVisibility): Promise<Points> {
   // Layout: see encodePoints in server.ts.
-  const buf = await (await fetch("/api/points")).arrayBuffer();
+  const response = await fetch(withPhotoVisibility("/api/points", visibility));
+  if (!response.ok) throw new Error("Couldn't load photos. Try again.");
+  const buf = await response.arrayBuffer();
   const [n, jsonBytes] = new Uint32Array(buf, 0, 2) as unknown as [number, number];
   const countries = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, jsonBytes))) as string[];
   let off = 8 + Math.ceil(jsonBytes / 8) * 8;
@@ -50,9 +56,10 @@ export async function loadPoints(): Promise<Points> {
   const source = col(Uint8Array, 1);
   const precision = col(Uint8Array, 1);
   const dateManual = col(Uint8Array, 1);
+  const isPrivate = col(Uint8Array, 1);
   let dated = n;
   while (dated > 0 && Number.isNaN(t[dated - 1]!)) dated--;
-  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source, precision, dateManual };
+  return { n, dated, t, lat, lon, id, kind, aspect, country, countries, source, precision, dateManual, isPrivate };
 }
 
 /** First index with t >= x, within the dated prefix. */

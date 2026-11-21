@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AlbumDate, AlbumSummary } from "../albums";
-import { formatDate, formatYear, nf, thumbUrl } from "./data";
+import { formatDate, formatYear, nf } from "./data";
 import { Icon, IconButton } from "./Icons";
 import { useBackToClose } from "./history";
+import { HidePrivateContext, usePhotoUrls } from "./photoVisibility";
 
 export async function albumRequest<T>(path: string, method = "GET", body?: object, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/${path}`, {
@@ -27,10 +28,11 @@ export function albumDates(album: AlbumSummary): string {
 }
 
 export function AlbumCover({ album }: { album: AlbumSummary }) {
+  const { thumbnail } = usePhotoUrls();
   return (
     <span className="album-cover">
       {album.coverId != null ? (
-        <img src={thumbUrl(album.coverId, "m")} alt="" loading="lazy" />
+        <img src={thumbnail(album.coverId, "m")} alt="" loading="lazy" />
       ) : (
         <Icon name={album.id === 0 ? "star" : "album"} />
       )}
@@ -49,10 +51,12 @@ export function AlbumList({
   albums,
   onOpen,
   onCreate,
+  onOpenPrivate,
 }: {
   albums: AlbumSummary[];
   onOpen(id: number): void;
   onCreate(): void;
+  onOpenPrivate(): void;
 }) {
   return (
     <div className="album-index">
@@ -72,6 +76,12 @@ export function AlbumList({
             </span>
           </button>
         ))}
+        <button className="album-card" onClick={onOpenPrivate}>
+          <span className="album-cover">
+            <Icon name="lock" />
+          </span>
+          <strong>Private</strong>
+        </button>
       </div>
     </div>
   );
@@ -102,6 +112,7 @@ export function AlbumHeader({
     onCancel(): void;
   };
 }) {
+  const { thumbnail } = usePhotoUrls();
   const previewCover = coverPicker?.candidate ?? album.coverId;
   const picking = coverPicker != null;
   const cancelButton = useRef<HTMLButtonElement>(null);
@@ -137,7 +148,7 @@ export function AlbumHeader({
           <div className="cover-picker-controls" inert={!picking}>
             <div className="cover-picker-preview" aria-hidden="true">
               {picking && previewCover != null ? (
-                <img src={thumbUrl(previewCover, "m")} alt="" />
+                <img src={thumbnail(previewCover, "m")} alt="" />
               ) : (
                 <Icon name="album" />
               )}
@@ -180,6 +191,7 @@ function AlbumDialog({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const hidePrivate = useContext(HidePrivateContext);
   useBackToClose(() => {
     if (busy) return false;
     onClose();
@@ -206,6 +218,14 @@ function AlbumDialog({
         <h2>{title}</h2>
         <IconButton name="close" label="Close" disabled={busy} onClick={onClose} />
       </div>
+      {hidePrivate && (
+        <div className="row private-dialog-controls">
+          <span>Private photos visible</span>
+          <button type="button" className="btn btn-small" onClick={hidePrivate}>
+            Hide now
+          </button>
+        </div>
+      )}
       {children}
     </dialog>
   );

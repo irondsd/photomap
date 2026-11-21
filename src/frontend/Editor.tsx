@@ -1,3 +1,4 @@
+import { usePhotoUrls } from "./photoVisibility";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ASPECTS,
@@ -181,6 +182,7 @@ function useBox(ref: React.RefObject<HTMLElement | null>) {
 }
 
 export function Editor({ photo, onDone }: EditorProps) {
+  const { photoUrl } = usePhotoUrls();
   const initial = useMemo(() => photo.edits ?? identity(), [photo.edits]);
   const [edits, setEdits] = useState<Edits>(initial);
   /** The crop the person chose; straightening shrinks it to fit, and grows it back. */
@@ -198,12 +200,12 @@ export function Editor({ photo, onDone }: EditorProps) {
 
   useEffect(() => {
     const im = new Image();
-    im.src = `/thumbs/l/${photo.id}?original`;
+    im.src = photoUrl(`/thumbs/l/${photo.id}?original`);
     im.decode().then(
       () => setImg(im),
       () => setLoadError(true),
     );
-  }, [photo.id]);
+  }, [photo.id, photoUrl]);
 
   const [sw, sh] = img ? [img.naturalWidth, img.naturalHeight] : [3, 2];
   const [fw, fh] = frameSize(sw, sh, edits.quarter);
@@ -400,7 +402,7 @@ export function Editor({ photo, onDone }: EditorProps) {
     setBusy("save");
     setError(null);
     try {
-      const r = await fetch(`/api/photos/${photo.id}/edits`, {
+      const r = await fetch(photoUrl(`/api/photos/${photo.id}/edits`), {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ edits }),
@@ -418,7 +420,7 @@ export function Editor({ photo, onDone }: EditorProps) {
     setBusy("copy");
     setError(null);
     try {
-      const r = await fetch(`/api/photos/${photo.id}/edits/copy`, {
+      const r = await fetch(photoUrl(`/api/photos/${photo.id}/edits/copy`), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ edits }),

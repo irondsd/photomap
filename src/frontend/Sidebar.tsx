@@ -1,5 +1,6 @@
+import { usePhotoUrls } from "./photoVisibility";
 import { useLayoutEffect, useRef, useState } from "react";
-import { formatDate, formatMonth, nf, thumbUrl, type Points } from "./data";
+import { formatDate, formatMonth, nf, type Points } from "./data";
 
 export type SidebarTab = "map" | "noloc";
 
@@ -30,6 +31,7 @@ function Grid({
   onHover(i: number | null): void;
   empty: React.ReactNode;
 }) {
+  const { thumbnail } = usePhotoUrls();
   const scroller = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 300, h: 600 });
   const [scrollTop, setScrollTop] = useState(0);
@@ -76,7 +78,7 @@ function Grid({
           title={Number.isNaN(t) ? "Unknown date" : formatDate(t)}
         >
           <img
-            src={thumbUrl(points.id[i]!, "s")}
+            src={thumbnail(points.id[i]!, "s")}
             alt=""
             loading="lazy"
             decoding="async"

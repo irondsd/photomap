@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, thumbUrl, type Points } from "./data";
+import { usePhotoUrls } from "./photoVisibility";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, type Points } from "./data";
 import { buildLayout, firstVisible, galleryOrder, groupAt, HEADER_H, rowHeightFor, type Layout } from "./galleryLayout";
 import { BulkDateDialog } from "./BulkDate";
 import { BulkLocationDialog } from "./BulkLocation";
@@ -29,7 +30,9 @@ interface GalleryProps {
   membership?: Uint8Array;
   oldestFirst?: boolean;
   emptyMessage?: string;
+  scrollPosition?: RefObject<number>;
   onAddToAlbum(ids: number[], onDone: () => void): void;
+  onChangePrivacy(ids: number[], makePrivate: boolean): Promise<void>;
   onRemoveFromAlbum?(ids: number[]): Promise<void>;
   coverPicker?: {
     current: number | null;
@@ -51,14 +54,17 @@ export function Gallery({
   membership,
   oldestFirst,
   emptyMessage = "No photos match this filter.",
+  scrollPosition,
   onAddToAlbum,
+  onChangePrivacy,
   onRemoveFromAlbum,
   coverPicker,
 }: GalleryProps) {
+  const { thumbnail, photoUrl, visibility } = usePhotoUrls();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const [scrollTop, setScrollTop] = useState(0);
+  const [scrollTop, setScrollTop] = useState(() => scrollPosition?.current ?? 0);
   // Photo ids, so a selection survives the index being reloaded.
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
@@ -95,12 +101,15 @@ export function Gallery({
 
   // Scroll position, at most once per frame.
   const frame = useRef(0);
-  const saved = useRef(0);
+  const localScrollPosition = useRef(0);
+  const saved = scrollPosition ?? localScrollPosition;
+  const restoreScroll = useRef(true);
+  useLayoutEffect(() => () => cancelAnimationFrame(frame.current), []);
   const onScroll = () => {
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
-      const el = scroller.current!;
-      if (el.clientHeight === 0) return; // hidden
+      const el = scroller.current;
+      if (!el?.clientHeight || restoreScroll.current) return;
       saved.current = el.scrollTop;
       setScrollTop(el.scrollTop);
     });
@@ -161,10 +170,19 @@ export function Gallery({
     setScrollTop(el.scrollTop);
   }, [layout]);
 
-  // Hiding the gallery (display: none) resets its scroll position; put it back when shown.
+  // Wait for the photos to lay out before restoring a gallery that was hidden or reloaded.
   useLayoutEffect(() => {
-    if (active && scroller.current) scroller.current.scrollTop = saved.current;
-  }, [active]);
+    if (!active) {
+      restoreScroll.current = true;
+      return;
+    }
+    if (!restoreScroll.current || !layout) return;
+    const el = scroller.current!;
+    el.scrollTop = saved.current;
+    saved.current = el.scrollTop;
+    setScrollTop(el.scrollTop);
+    restoreScroll.current = false;
+  }, [active, layout, saved]);
 
   // ------------------------------------------------------------ selection
   const selecting = selected.size > 0;
@@ -236,6 +254,20 @@ export function Gallery({
     () => visibleSelection.filter((id) => points.dateManual[indexOf(id) ?? -1] === 1),
     [visibleSelection, points, indexOf],
   );
+  const privateIds = visibleSelection.filter((id) => points.isPrivate[indexOf(id) ?? -1] === 1);
+  const publicIds = visibleSelection.filter((id) => points.isPrivate[indexOf(id) ?? -1] === 0);
+  const changePrivacy = async (ids: number[], makePrivate: boolean) => {
+    setBusy(true);
+    setAlbumError("");
+    try {
+      await onChangePrivacy(ids, makePrivate);
+      clear();
+    } catch (err) {
+      setAlbumError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!active || paused || coverPicker) return;
@@ -260,7 +292,7 @@ export function Gallery({
       return;
     setBusy(true);
     try {
-      const r = await fetch("/api/locations/reset", {
+      const r = await fetch(photoUrl("/api/locations/reset"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ids: manualIds }),
@@ -285,7 +317,7 @@ export function Gallery({
       return;
     setBusy(true);
     try {
-      const r = await fetch("/api/dates/reset", {
+      const r = await fetch(photoUrl("/api/dates/reset"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ids: manualDateIds }),
@@ -334,6 +366,8 @@ export function Gallery({
       const id = points.id[i]!;
       const sel = selected.has(id);
       const isVideo = points.kind[i] === 2;
+      const isPrivate = points.isPrivate[i] === 1;
+      const isFavorite = favorites.has(id);
       const currentCover = coverPicker?.current === id;
       items.push(
         <div
@@ -343,7 +377,7 @@ export function Gallery({
           onClick={coverPicker ? undefined : (e) => onTileClick(k, e)}
         >
           <img
-            src={thumbUrl(id, "m")}
+            src={thumbnail(id, "m")}
             alt=""
             loading="lazy"
             decoding="async"
@@ -351,10 +385,19 @@ export function Gallery({
             onLoad={(e) => e.currentTarget.classList.add("is-loaded")}
           />
           {isVideo && <span className="gtile-video">▶</span>}
-          {favorites.has(id) && (
-            <span className="gtile-star" title="Favorite" role="img" aria-label="Favorite">
-              <Icon name="star" />
-            </span>
+          {(isPrivate || isFavorite) && (
+            <div className="gtile-badges">
+              {isPrivate && (
+                <span className="gtile-private" title="Private" role="img" aria-label="Private">
+                  <Icon name="lock" />
+                </span>
+              )}
+              {isFavorite && (
+                <span className="gtile-star" title="Favorite" role="img" aria-label="Favorite">
+                  <Icon name="star" />
+                </span>
+              )}
+            </div>
           )}
           {Number.isNaN(points.lat[i]!) && (
             <span className="gtile-nogeo" title="No location">
@@ -426,6 +469,16 @@ export function Gallery({
           >
             <Icon name="addAlbum" /> Add to album…
           </button>
+          {visibility === "all" && publicIds.length > 0 && (
+            <button className="btn album-action" disabled={busy} onClick={() => void changePrivacy(publicIds, true)}>
+              <Icon name="lock" /> {privateIds.length ? `Make ${publicIds.length} private` : "Make private"}
+            </button>
+          )}
+          {privateIds.length > 0 && (
+            <button className="btn" disabled={busy} onClick={() => void changePrivacy(privateIds, false)}>
+              {publicIds.length ? `Remove ${privateIds.length} from Private` : "Remove from Private"}
+            </button>
+          )}
           {onRemoveFromAlbum && (
             <button
               className="btn"

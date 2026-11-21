@@ -12,7 +12,6 @@ import {
   nf,
   bumpThumb,
   thumbStamp,
-  thumbUrl,
   type Points,
 } from "./data";
 import { Editor, type EditResult } from "./Editor";
@@ -25,6 +24,8 @@ import { useZoom } from "./zoom";
 import { useBackToClose } from "./history";
 import { albumRequest } from "./AlbumViews";
 import { Icon, IconButton } from "./Icons";
+import { usePhotoUrls } from "./photoVisibility";
+import { withPhotoVisibility } from "../photo-visibility";
 import type { AlbumSummary } from "../albums";
 
 interface PhotoDetail {
@@ -66,7 +67,7 @@ interface ViewerProps {
   indexOf(id: number): number | undefined;
   onIndex(i: number): void;
   onClose(): void;
-  onShowOnMap(i: number): void;
+  onShowOnMap?(i: number): void;
   /** The photo's location, date or edits were changed; the caller should reload the index. */
   onLocationChange(): void;
   /** The photo was moved to the Trash and is gone from the index. */
@@ -76,6 +77,7 @@ interface ViewerProps {
   albumPickerOpen: boolean;
   onAddToAlbum(id: number): void;
   onFavorite(id: number, favorite: boolean): Promise<void>;
+  onChangePrivacy(ids: number[], makePrivate: boolean): Promise<void>;
 }
 
 async function sendEdits(url: string, method: string): Promise<PhotoDetail> {
@@ -124,8 +126,8 @@ function dateInputOf(d: PhotoDetail): DateInput | null {
   return toDateInput(d.taken_local, !DAY_ONLY.has(d.time_source));
 }
 
-async function sendDate(id: number, v: DateInput | null): Promise<PhotoDetail> {
-  const r = await fetch(`/api/photos/${id}/date`, {
+async function sendDate(url: string, v: DateInput | null): Promise<PhotoDetail> {
+  const r = await fetch(url, {
     method: v ? "POST" : "DELETE",
     headers: v ? { "content-type": "application/json" } : undefined,
     body: v ? JSON.stringify({ date: v.date, time: v.time || null }) : undefined,
@@ -135,8 +137,8 @@ async function sendDate(id: number, v: DateInput | null): Promise<PhotoDetail> {
   return j;
 }
 
-async function sendLocation(id: number, c: LatLon | null): Promise<PhotoDetail> {
-  const r = await fetch(`/api/photos/${id}/location`, {
+async function sendLocation(url: string, c: LatLon | null): Promise<PhotoDetail> {
+  const r = await fetch(url, {
     method: c ? "POST" : "DELETE",
     headers: c ? { "content-type": "application/json" } : undefined,
     body: c ? JSON.stringify(c) : undefined,
@@ -166,10 +168,13 @@ export function Viewer({
   albumPickerOpen,
   onAddToAlbum,
   onFavorite,
+  onChangePrivacy,
 }: ViewerProps) {
   useBackToClose(onClose);
+  const { visibility, photoUrl, thumbnail } = usePhotoUrls();
   const id = ids[index]!;
   const i = indexOf(id);
+  const isPrivate = i != null && points.isPrivate[i] === 1;
   const isVideo = i != null && points.kind[i] === 2;
   const [detail, setDetail] = useState<PhotoDetail | null>(null);
   /** The photo whose large image has loaded. Keyed by id, not reset in an effect: after a wheel event React runs
@@ -207,11 +212,16 @@ export function Viewer({
 
   useEffect(() => {
     const ac = new AbortController();
-    albumRequest<Pick<AlbumSummary, "id" | "name">[]>(`photos/${id}/albums`, "GET", undefined, ac.signal)
+    albumRequest<Pick<AlbumSummary, "id" | "name">[]>(
+      withPhotoVisibility(`photos/${id}/albums`, visibility),
+      "GET",
+      undefined,
+      ac.signal,
+    )
       .then((albums) => setMembership({ id, albums }))
       .catch(() => {});
     return () => ac.abort();
-  }, [id, albumsRevision]);
+  }, [id, albumsRevision, visibility]);
 
   const toggleFavorite = async () => {
     if (pendingStar) return;
@@ -232,7 +242,7 @@ export function Viewer({
     setMenu(false);
     setNotice(null);
     const ac = new AbortController();
-    fetch(`/api/photos/${id}`, { signal: ac.signal })
+    fetch(photoUrl(`/api/photos/${id}`), { signal: ac.signal })
       .then((r) => r.json())
       .then(setDetail)
       .catch(() => {});
@@ -240,17 +250,17 @@ export function Viewer({
     for (const k of [index + 1, index - 1]) {
       const nid = ids[k];
       const j = nid != null ? indexOf(nid) : undefined;
-      if (j != null && points.kind[j] !== 2) new Image().src = thumbUrl(nid!, "l");
+      if (j != null && points.kind[j] !== 2) new Image().src = thumbnail(nid!, "l");
     }
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per photo, not when the list around it changes.
-  }, [id]);
+  }, [id, visibility]);
 
   // Zoomed in, the preview runs out of pixels: swap in the original if the browser can show it (not RAW;
   // HEIC only in Safari — a failed decode just keeps the preview).
   // An edited photo zooms into a full-size render of its edits instead.
   const wantFull = zoom.zoomed && d?.kind === "photo";
-  const fullSrc = d?.edits ? `/edited/${id}?v=${stamp}` : `/original/${id}`;
+  const fullSrc = photoUrl(d?.edits ? `/edited/${id}?v=${stamp}` : `/original/${id}`);
   useEffect(() => {
     if (!wantFull || fullRequested.current === fullSrc) return;
     fullRequested.current = fullSrc;
@@ -326,7 +336,7 @@ export function Viewer({
     });
 
   const saveLocation = async (c: LatLon | null) => {
-    const updated = await sendLocation(id, c);
+    const updated = await sendLocation(photoUrl(`/api/photos/${id}/location`), c);
     setDetail(updated);
     setEditing(false);
     onLocationChange();
@@ -338,7 +348,7 @@ export function Viewer({
     if (ok) saveLocation(null).catch((err) => alert(err.message));
   };
   const saveDate = async (v: DateInput | null) => {
-    const updated = await sendDate(id, v);
+    const updated = await sendDate(photoUrl(`/api/photos/${id}/date`), v);
     setDetail(updated);
     setEditingDate(false);
     onLocationChange();
@@ -385,7 +395,7 @@ export function Viewer({
       return;
     setWorking(true);
     try {
-      editsChanged(await sendEdits(`/api/photos/${id}/edits`, "DELETE"));
+      editsChanged(await sendEdits(photoUrl(`/api/photos/${id}/edits`), "DELETE"));
       setNotice("Reverted to the original.");
     } catch (err) {
       alert((err as Error).message);
@@ -404,7 +414,7 @@ export function Viewer({
       return;
     setWorking(true);
     try {
-      editsChanged(await sendEdits(`/api/photos/${id}/edits/apply`, "POST"));
+      editsChanged(await sendEdits(photoUrl(`/api/photos/${id}/edits/apply`), "POST"));
       setNotice(`Edits written into ${d.name}.`);
     } catch (err) {
       alert((err as Error).message);
@@ -423,7 +433,7 @@ export function Viewer({
       return;
     setWorking(true);
     try {
-      const r = await fetch(`/api/photos/${id}`, { method: "DELETE" });
+      const r = await fetch(photoUrl(`/api/photos/${id}`), { method: "DELETE" });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "Couldn't delete the photo");
       onDeleted(id);
@@ -454,8 +464,8 @@ export function Viewer({
         {isVideo ? (
           <video
             key={id}
-            src={`/original/${id}`}
-            poster={thumbUrl(id, "l")}
+            src={photoUrl(`/original/${id}`)}
+            poster={thumbnail(id, "l")}
             controls
             autoPlay
             playsInline
@@ -465,7 +475,7 @@ export function Viewer({
           <>
             <img
               key={`s${id}`}
-              src={thumbUrl(id, "s")}
+              src={thumbnail(id, "s")}
               alt=""
               className="viewer-media viewer-placeholder"
               aria-hidden
@@ -473,7 +483,7 @@ export function Viewer({
             <img
               key={`l${id}`}
               ref={imgRef}
-              src={fullId === id ? fullSrc : thumbUrl(id, "l")}
+              src={fullId === id ? fullSrc : thumbnail(id, "l")}
               alt={d?.name ?? ""}
               className={`viewer-media ${loaded ? "is-loaded" : ""} ${zoom.animate ? "is-animating" : ""}`}
               style={zoom.imgProps.style}
@@ -536,6 +546,24 @@ export function Viewer({
                   >
                     <Icon name="addAlbum" /> Add to album…
                   </button>
+                  {(isPrivate || visibility === "all") && (
+                    <button
+                      onClick={async () => {
+                        menuButton.current?.focus();
+                        setMenu(false);
+                        setWorking(true);
+                        try {
+                          await onChangePrivacy([id], !isPrivate);
+                        } catch (err) {
+                          setNotice((err as Error).message);
+                        } finally {
+                          setWorking(false);
+                        }
+                      }}
+                    >
+                      <Icon name="lock" /> {isPrivate ? "Remove from Private" : "Make private"}
+                    </button>
+                  )}
                   {d?.edits && (
                     <>
                       <button onClick={revertEdits}>
@@ -649,7 +677,7 @@ export function Viewer({
                     {d.alt != null && ` · ${Math.round(d.alt)} m`}
                   </div>
                   <div className="row">
-                    {i != null && (
+                    {i != null && onShowOnMap && (
                       <button className="btn btn-small" onClick={() => onShowOnMap(i)}>
                         Show on map
                       </button>
@@ -724,11 +752,20 @@ export function Viewer({
                 </div>
                 <div className="dim break small">{d.path}</div>
                 <div className="row">
-                  <button className="btn btn-small" onClick={() => fetch(`/api/reveal/${id}`, { method: "POST" })}>
+                  <button
+                    className="btn btn-small"
+                    onClick={() => fetch(photoUrl(`/api/reveal/${id}`), { method: "POST" })}
+                  >
                     Show in Finder
                   </button>
-                  <a className="btn btn-small" href={`/original/${id}`} target="_blank" rel="noreferrer">
-                    {d.edits ? "Open original file" : "Open original"}
+                  <a
+                    className="btn btn-small"
+                    href={isPrivate ? photoUrl(`/original/${id}`) : `/original/${id}`}
+                    download={isPrivate ? d.name : undefined}
+                    target={isPrivate ? undefined : "_blank"}
+                    rel="noreferrer"
+                  >
+                    {isPrivate ? "Download original" : d.edits ? "Open original file" : "Open original"}
                   </a>
                 </div>
               </section>

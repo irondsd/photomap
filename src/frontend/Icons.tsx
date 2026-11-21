@@ -17,6 +17,9 @@ const paths = {
     </>
   ),
   close: <path d="m6 6 12 12M18 6 6 18" />,
+  lock: (
+    <path d="M7 10V7a5 5 0 0 1 10 0v3M6 10h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Zm6 5v2" />
+  ),
   album: (
     <>
       <path d="M5 7V4h14v3" />

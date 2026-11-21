@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { addRoot, db, deletePhoto, getPhoto } from "./db";
+import { addRoot, db, deletePhoto, getPhoto, setPhotosPrivate, stats, touchPhoto } from "./db";
 import {
   albumCatalog,
   albumPhotoIds,
@@ -78,5 +78,50 @@ test("albums use capture dates and hide missing photos without losing their memb
   } finally {
     db.run("ROLLBACK TO albums_test");
     db.run("RELEASE albums_test");
+  }
+});
+
+test("private members disappear from normal browsing and return with their cover and favorite intact", () => {
+  db.run("SAVEPOINT private_album_test");
+  try {
+    const root = addRoot("/private-album-test");
+    const insert = (name: string, time: number) =>
+      Number(
+        db.run(
+          `INSERT INTO photos (root_id, path, rel_dir, name, ext, kind, size, mtime, scan_gen, indexed_at, taken_local, time_source, lat, lon)
+       VALUES (?, ?, '', ?, 'jpg', 'photo', 0, 0, 0, 0, ?, 'exif', 1, 1)`,
+          [root.id, `${root.path}/${name}`, name, time],
+        ).lastInsertRowid,
+      );
+    const visible = insert("visible.jpg", 10);
+    const hidden = insert("hidden.jpg", 20);
+    const trip = createAlbum("Trip", [visible, hidden]);
+    setAlbumCover(trip, hidden);
+    setFavorite(hidden, true);
+    const publicCount = stats("public").geotagged;
+
+    expect(setPhotosPrivate([hidden], true)).toEqual([hidden]);
+    expect(setPhotosPrivate([hidden], true)).toEqual([]);
+    touchPhoto(hidden, 1);
+    expect(stats("public").geotagged).toBe(publicCount - 1);
+    expect(stats("private").geotagged).toBe(1);
+    expect(albumPhotoIds(trip)).toEqual([visible]);
+    expect(albumPhotoIds(trip, "private")).toEqual([hidden]);
+    expect(albumCatalog().favorites.ids).not.toContain(hidden);
+    expect(albumCatalog().albums.find((album) => album.id === trip)).toMatchObject({
+      count: 1,
+      coverId: visible,
+      last: { time: 10 },
+    });
+    expect(albumCatalog("all").favorites.ids).toContain(hidden);
+    expect(albumCatalog("all").albums.find((album) => album.id === trip)).toMatchObject({ count: 2, coverId: hidden });
+
+    expect(setPhotosPrivate([hidden], false)).toEqual([hidden]);
+    expect(albumPhotoIds(trip)).toEqual([visible, hidden]);
+    expect(albumCatalog().favorites.ids).toContain(hidden);
+    expect(albumCatalog().albums.find((album) => album.id === trip)?.coverId).toBe(hidden);
+  } finally {
+    db.run("ROLLBACK TO private_album_test");
+    db.run("RELEASE private_album_test");
   }
 });

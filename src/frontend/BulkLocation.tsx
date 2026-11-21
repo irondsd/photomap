@@ -1,5 +1,6 @@
+import { usePhotoUrls } from "./photoVisibility";
 import { useEffect, useMemo } from "react";
-import { nearestTagged, nf, SOURCE, thumbUrl, type Points } from "./data";
+import { nearestTagged, nf, SOURCE, type Points } from "./data";
 import { LocationPicker } from "./LocationPicker";
 import type { LatLon } from "./coords";
 
@@ -15,6 +16,7 @@ interface BulkLocationDialogProps {
 }
 
 export function BulkLocationDialog({ points, ids, indexOf, onClose, onDone }: BulkLocationDialogProps) {
+  const { thumbnail, photoUrl } = usePhotoUrls();
   // Point indices in time order.
   const indices = useMemo(
     () =>
@@ -52,7 +54,7 @@ export function BulkLocationDialog({ points, ids, indexOf, onClose, onDone }: Bu
   }, [onClose]);
 
   const save = async (c: LatLon) => {
-    const r = await fetch("/api/locations", {
+    const r = await fetch(photoUrl("/api/locations"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids, lat: c.lat, lon: c.lon }),
@@ -82,7 +84,7 @@ export function BulkLocationDialog({ points, ids, indexOf, onClose, onDone }: Bu
         </header>
         <div className="bulk-strip">
           {indices.slice(0, STRIP).map((i) => (
-            <img key={i} src={thumbUrl(points.id[i]!, "s")} alt="" />
+            <img key={i} src={thumbnail(points.id[i]!, "s")} alt="" />
           ))}
           {indices.length > STRIP && <span className="bulk-more">+{nf.format(indices.length - STRIP)}</span>}
         </div>

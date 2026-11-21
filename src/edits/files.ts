@@ -1,9 +1,9 @@
 import { chmod, rename, rm, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { kindOf } from "../config";
-import { db, getRoot, setEdits, upsertPhoto, type PhotoRow } from "../db";
+import { db, getPhoto, getRoot, setEdits, upsertPhoto, type PhotoInsert, type PhotoRow } from "../db";
 import { extract } from "../scan/extract";
 import { keepAssignedLocation } from "../scan/locate";
 import { keepManualDate } from "../scan/manualDates";
@@ -56,24 +56,24 @@ async function renderFull(p: PhotoRow, e: Edits): Promise<RawImage> {
 }
 
 /**
- * Indexes one file right away, as a scan would, carrying over what was set by hand on `like`
+ * Reads index metadata as a scan would, carrying over what was set by hand on `like`
  * (the same file before it was rewritten, or the original of a copy).
  */
-async function indexFile(path: string, like: PhotoRow, size: [number, number]): Promise<number> {
+async function readIndex(path: string, rendered: string, like: PhotoRow, size: [number, number]): Promise<PhotoInsert> {
   const root = getRoot(like.root_id);
   if (!root) throw new Error("The folder is no longer in the library");
-  const st = await stat(path);
+  const st = await stat(rendered);
   const name = basename(path);
   const ext = extname(name).slice(1).toLowerCase();
   const kind = kindOf(ext) ?? "photo";
-  let meta = await extract(path, kind, name, st.mtimeMs);
+  let meta = await extract(rendered, kind, name, st.mtimeMs);
   if (like.gps_source === "manual" && like.lat != null && like.lon != null) {
     meta = keepAssignedLocation(meta, like.lat, like.lon);
   } else if (like.gps_source?.startsWith("inferred:") && meta.lat == null && like.lat != null && like.lon != null) {
     meta = keepAssignedLocation(meta, like.lat, like.lon, like.gps_source as `inferred:${string}`);
   }
   meta = keepManualDate(meta, like);
-  upsertPhoto({
+  return {
     root_id: root.id,
     path,
     rel_dir: relative(root.path, dirname(path)),
@@ -88,21 +88,24 @@ async function indexFile(path: string, like: PhotoRow, size: [number, number]): 
     width: size[0],
     height: size[1],
     orientation: 1,
-  });
-  return db.query<{ id: number }, [string]>(`SELECT id FROM photos WHERE path = ?`).get(path)!.id;
+  };
 }
 
-/** Writes to a hidden file next to `dest`, then moves it into place, so a failure leaves `dest` as it was. */
-async function writeNextTo(dest: string, img: RawImage, ext: string, metaFrom: string, mode?: number) {
-  const tmp = join(dirname(dest), `.${basename(dest)}.photomap-${Math.random().toString(36).slice(2)}.${ext}`);
+/** Stages a render next to its destination with a name the scanner skips. */
+async function withRenderedFile<T>(
+  dest: string,
+  img: RawImage,
+  ext: string,
+  metaFrom: string,
+  publish: (tmp: string) => Promise<T>,
+): Promise<T> {
+  const tmp = join(dirname(dest), `._${basename(dest)}.photomap-${crypto.randomUUID()}.${ext}`);
   try {
     await encode(img, ext).toFile(tmp);
     await copyMetadata(metaFrom, tmp);
-    if (mode != null) await chmod(tmp, mode);
-    await rename(tmp, dest);
-  } catch (err) {
-    await rm(tmp, { force: true });
-    throw err;
+    return await publish(tmp);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => {});
   }
 }
 
@@ -123,8 +126,26 @@ export async function saveCopy(p: PhotoRow, e: Edits): Promise<{ id: number; nam
   const img = await renderFull(p, e);
   const ext = canWriteInto(p) ? p.ext : "jpg";
   const path = copyPath(p, ext);
-  await writeNextTo(path, img, ext, p.path);
-  const id = await indexFile(path, p, [img.width, img.height]);
+  const id = await withRenderedFile(path, img, ext, p.path, async (tmp) => {
+    const row = await readIndex(path, tmp, p, [img.width, img.height]);
+    let published = false;
+    try {
+      return db
+        .transaction(() => {
+          if (existsSync(path)) throw new Error("A copy with that name appeared. Try again.");
+          // Set visibility before the scanner can see the new file.
+          upsertPhoto(row, (getPhoto(p.id)?.is_private ?? p.is_private) === 1);
+          const id = db.query<{ id: number }, [string]>("SELECT id FROM photos WHERE path = ?").get(path)!.id;
+          renameSync(tmp, path);
+          published = true;
+          return id;
+        })
+        .immediate();
+    } catch (error) {
+      if (published) renameSync(path, tmp);
+      throw error;
+    }
+  });
   // A copy without a date of its own gets the original's ("-edited" is a known copy name).
   await applyDateInference();
   return { id, name: basename(path) };
@@ -135,7 +156,10 @@ export async function writeIntoFile(p: PhotoRow, e: Edits): Promise<void> {
   if (!canWriteInto(p)) throw new Error(`.${p.ext} files can't be rewritten; save a copy instead`);
   const img = await renderFull(p, e);
   const { mode } = await stat(p.path);
-  await writeNextTo(p.path, img, p.ext, p.path, mode);
+  await withRenderedFile(p.path, img, p.ext, p.path, async (tmp) => {
+    await chmod(tmp, mode);
+    await rename(tmp, p.path);
+  });
   setEdits(p.id, null);
-  await indexFile(p.path, { ...p, edits: null }, [img.width, img.height]);
+  upsertPhoto(await readIndex(p.path, p.path, p, [img.width, img.height]));
 }

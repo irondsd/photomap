@@ -1,5 +1,6 @@
+import { usePhotoUrls } from "./photoVisibility";
 import { useEffect, useMemo } from "react";
-import { nf, PRECISION, thumbUrl, type Points } from "./data";
+import { nf, PRECISION, type Points } from "./data";
 import { DatePicker, type DateInput } from "./DatePicker";
 
 const STRIP = 12;
@@ -14,6 +15,7 @@ interface BulkDateDialogProps {
 }
 
 export function BulkDateDialog({ points, ids, indexOf, onClose, onDone }: BulkDateDialogProps) {
+  const { thumbnail, photoUrl } = usePhotoUrls();
   // Point indices in time order.
   const indices = useMemo(
     () =>
@@ -42,7 +44,7 @@ export function BulkDateDialog({ points, ids, indexOf, onClose, onDone }: BulkDa
   }, [onClose]);
 
   const save = async (v: DateInput) => {
-    const r = await fetch("/api/dates", {
+    const r = await fetch(photoUrl("/api/dates"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids, date: v.date, time: v.time || null }),
@@ -71,7 +73,7 @@ export function BulkDateDialog({ points, ids, indexOf, onClose, onDone }: BulkDa
         </header>
         <div className="bulk-strip">
           {indices.slice(0, STRIP).map((i) => (
-            <img key={i} src={thumbUrl(points.id[i]!, "s")} alt="" />
+            <img key={i} src={thumbnail(points.id[i]!, "s")} alt="" />
           ))}
           {indices.length > STRIP && <span className="bulk-more">+{nf.format(indices.length - STRIP)}</span>}
         </div>
