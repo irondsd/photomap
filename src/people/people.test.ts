@@ -1,7 +1,16 @@
 import { expect, test } from "bun:test";
 import { addRoot, db, setPhotosPrivate } from "../db";
 import { EMBEDDING_SIZE, FaceGroups } from "./group";
-import { initPeople, listPeople, mergePeople, namePerson, personPhotos, visibleFace } from "./store";
+import {
+  initPeople,
+  listPeople,
+  mergePeople,
+  namePerson,
+  personDetail,
+  personPhotos,
+  setPersonCover,
+  visibleFace,
+} from "./store";
 
 const embedding = (x: number, y: number, z = 0) => {
   const values = new Float32Array(EMBEDDING_SIZE);
@@ -28,20 +37,20 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
   try {
     const root = addRoot("/people-test");
     initPeople();
-    const photo = (name: string) => {
+    const photo = (name: string, time: number, source: string) => {
       const id = Number(
         db.run(
           `INSERT INTO photos
-        (root_id, path, rel_dir, name, ext, kind, size, mtime, scan_gen, indexed_at)
-        VALUES (?, ?, '', ?, 'jpg', 'photo', 1, 1, 0, 0)`,
-          [root.id, `${root.path}/${name}`, name],
+        (root_id, path, rel_dir, name, ext, kind, size, mtime, scan_gen, indexed_at, taken_local, time_source)
+        VALUES (?, ?, '', ?, 'jpg', 'photo', 1, 1, 0, 0, ?, ?)`,
+          [root.id, `${root.path}/${name}`, name, time, source],
         ).lastInsertRowid,
       );
       db.run("INSERT INTO face_scans (photo_id, mtime, size) VALUES (?, 1, 1)", [id]);
       return id;
     };
-    const publicPhoto = photo("public.jpg");
-    const privatePhoto = photo("private.jpg");
+    const publicPhoto = photo("public.jpg", 10, "folder");
+    const privatePhoto = photo("private.jpg", 20, "exif");
     setPhotosPrivate([privatePhoto], true);
     const a = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
     const b = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
@@ -59,13 +68,34 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
 
     expect(personPhotos(a, "public")).toEqual([publicPhoto]);
     expect(personPhotos(b, "public")).toEqual([publicPhoto]);
+    expect(setPersonCover(a, privatePhoto, "public")).toBe(false);
+    expect(setPersonCover(a, publicPhoto, "public")).toBe(true);
     expect(namePerson(a, "Named group", "public")).toBe(true);
     expect(mergePeople(a, a, "public")).toBe(false);
     expect(mergePeople(a, b, "public")).toBe(true);
     expect(personPhotos(a, "all")).toBeNull();
     expect(personPhotos(b, "public")).toEqual([publicPhoto]);
-    expect(listPeople("public").people).toEqual([{ id: b, name: "Named group", count: 1, coverId: publicFace }]);
-    expect(listPeople("all").people).toEqual([{ id: b, name: "Named group", count: 2, coverId: privateFace }]);
+    const first = { time: 10, yearOnly: true };
+    const last = { time: 20, yearOnly: false };
+    const summary = {
+      id: b,
+      name: "Named group",
+      count: 1,
+      coverId: publicFace,
+      coverPhotoId: publicPhoto,
+      first,
+      last: first,
+    };
+    expect(listPeople("public").people).toEqual([summary]);
+    expect(personDetail(b, "all")).toEqual({
+      person: { ...summary, count: 2, last },
+      ids: [publicPhoto, privatePhoto],
+    });
+    expect(setPersonCover(b, privatePhoto, "all")).toBe(true);
+    expect(listPeople("all").people).toEqual([
+      { ...summary, count: 2, coverId: privateFace, coverPhotoId: privatePhoto, last },
+    ]);
+    expect(listPeople("public").people).toEqual([summary]);
     expect(visibleFace(privateFace, "public")).toBeNull();
     db.run("UPDATE photos SET mtime = 2 WHERE id = ?", [publicPhoto]);
     expect(personPhotos(b, "public")).toBeNull();

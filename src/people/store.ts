@@ -1,4 +1,5 @@
 import { db, photoVisibilityFilter } from "../db";
+import { collectionTaken, memberDate, type AlbumDate } from "../albums";
 import type { PhotoVisibility } from "../photo-visibility";
 import type { FaceBox } from "./images";
 
@@ -7,6 +8,14 @@ export interface PersonSummary {
   name: string | null;
   count: number;
   coverId: number;
+  coverPhotoId: number;
+  first: AlbumDate | null;
+  last: AlbumDate | null;
+}
+
+export interface PersonDetail {
+  person: PersonSummary;
+  ids: number[];
 }
 
 export interface PeopleCatalog {
@@ -16,12 +25,15 @@ export interface PeopleCatalog {
   total: number;
 }
 
-// Only the explicit detection command creates these tables.
 export function initPeople() {
   db.transaction(() => {
     db.run(`CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT
+    );
+    CREATE TABLE IF NOT EXISTS person_covers (
+      person_id INTEGER PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+      photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS face_scans (
       photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
@@ -42,12 +54,84 @@ export function initPeople() {
   }).immediate();
 }
 
-const available = () => db.query("SELECT 1 FROM sqlite_schema WHERE name = 'faces' AND type = 'table'").get() != null;
+export const hasPeople = () =>
+  db.query("SELECT 1 FROM sqlite_schema WHERE name = 'faces' AND type = 'table'").get() != null;
 
 // Serve only current results. Changing a file invalidates its old boxes and matches.
 export const currentScan = "s.photo_id = p.id AND s.mtime = p.mtime AND s.size = p.size";
+export const pendingFacePhotos = `FROM photos p LEFT JOIN face_scans s ON ${currentScan}
+  WHERE p.missing = 0 AND p.kind IN ('photo', 'raw')`;
 export const facePhotos = `FROM faces f JOIN face_scans s ON s.photo_id = f.photo_id
   JOIN photos p ON ${currentScan} WHERE p.missing = 0`;
+
+function summaries(visibility: PhotoVisibility, id?: number): PersonSummary[] {
+  const scope = photoVisibilityFilter(visibility, "p");
+  const members = db
+    .query<
+      {
+        id: number;
+        name: string | null;
+        faceId: number;
+        photoId: number;
+        quality: number;
+        chosenPhoto: number | null;
+        time: number | null;
+        source: string | null;
+      },
+      number[]
+    >(
+      `SELECT f.person_id id, g.name, f.id faceId, f.photo_id photoId, f.quality,
+    c.photo_id chosenPhoto, ${collectionTaken} AS time, p.time_source AS source
+    FROM faces f JOIN face_scans s ON s.photo_id = f.photo_id JOIN photos p ON ${currentScan}
+    JOIN people g ON g.id = f.person_id LEFT JOIN person_covers c ON c.person_id = g.id
+    WHERE p.missing = 0${scope}${id == null ? "" : " AND f.person_id = ?"}
+    ORDER BY f.person_id, time, f.photo_id`,
+    )
+    .all(...(id == null ? [] : [id]));
+  const people: PersonSummary[] = [];
+  let group: PersonSummary | undefined;
+  let previousPhoto = 0;
+  let bestQuality = -Infinity;
+  let bestChosen = false;
+  for (const member of members) {
+    if (group?.id !== member.id) {
+      group = {
+        id: member.id,
+        name: member.name,
+        count: 0,
+        coverId: member.faceId,
+        coverPhotoId: member.photoId,
+        first: null,
+        last: null,
+      };
+      people.push(group);
+      previousPhoto = 0;
+      bestQuality = -Infinity;
+      bestChosen = false;
+    }
+    if (previousPhoto !== member.photoId) {
+      group.count++;
+      previousPhoto = member.photoId;
+      const date = memberDate(member);
+      if (date) {
+        group.first ??= date;
+        group.last = date;
+      }
+    }
+    const chosen = member.photoId === member.chosenPhoto;
+    if (
+      (chosen && !bestChosen) ||
+      (chosen === bestChosen &&
+        (member.quality > bestQuality || (member.quality === bestQuality && member.faceId < group.coverId)))
+    ) {
+      bestChosen = chosen;
+      bestQuality = member.quality;
+      group.coverId = member.faceId;
+      group.coverPhotoId = member.photoId;
+    }
+  }
+  return people.sort((a, b) => b.count - a.count || a.id - b.id);
+}
 
 export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
   const scope = photoVisibilityFilter(visibility, "p");
@@ -56,20 +140,8 @@ export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
       `SELECT count(*) n FROM photos p WHERE p.missing = 0 AND p.kind IN ('photo', 'raw')${scope}`,
     )
     .get()!.n;
-  if (!available()) return { people: [], scanned: 0, failed: 0, total };
-  const people = db
-    .query<PersonSummary, []>(
-      `WITH visible AS (
-    SELECT f.id AS coverId, f.person_id, f.photo_id,
-      row_number() OVER (PARTITION BY f.person_id ORDER BY f.quality DESC, f.id) AS rank
-    ${facePhotos}${scope}
-  )
-  SELECT people.id, people.name, count(DISTINCT v.photo_id) count,
-    max(CASE WHEN v.rank = 1 THEN v.coverId END) coverId
-  FROM visible v JOIN people ON people.id = v.person_id GROUP BY people.id
-  ORDER BY count DESC, people.id`,
-    )
-    .all();
+  if (!hasPeople()) return { people: [], scanned: 0, failed: 0, total };
+  const people = summaries(visibility);
   const { scanned, failed } = db
     .query<{ scanned: number; failed: number }, []>(
       `SELECT count(*) - coalesce(sum(s.failed), 0) scanned, coalesce(sum(s.failed), 0) failed
@@ -80,7 +152,7 @@ export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
 }
 
 export function personPhotos(id: number, visibility: PhotoVisibility): number[] | null {
-  if (!available()) return null;
+  if (!hasPeople()) return null;
   const photos = db
     .query<{ id: number }, [number]>(
       `SELECT DISTINCT p.id ${facePhotos} AND f.person_id = ?${photoVisibilityFilter(visibility, "p")}`,
@@ -89,8 +161,27 @@ export function personPhotos(id: number, visibility: PhotoVisibility): number[] 
   return photos.length ? photos.map((photo) => photo.id) : null;
 }
 
+export const personDetail = db.transaction((id: number, visibility: PhotoVisibility): PersonDetail | null => {
+  const ids = personPhotos(id, visibility);
+  if (!ids) return null;
+  return { person: summaries(visibility, id)[0]!, ids };
+});
+
+export const setPersonCover = db.transaction((id: number, photoId: number, visibility: PhotoVisibility) => {
+  if (!hasPeople()) return false;
+  return (
+    db.run(
+      `INSERT INTO person_covers (person_id, photo_id)
+    SELECT f.person_id, f.photo_id ${facePhotos} AND f.person_id = ? AND f.photo_id = ?
+    ${photoVisibilityFilter(visibility, "p")} LIMIT 1
+    ON CONFLICT(person_id) DO UPDATE SET photo_id = excluded.photo_id`,
+      [id, photoId],
+    ).changes > 0
+  );
+});
+
 export function visibleFace(id: number, visibility: PhotoVisibility) {
-  if (!available()) return null;
+  if (!hasPeople()) return null;
   return db
     .query<FaceBox & { photoId: number }, [number]>(
       `SELECT f.x, f.y, f.w, f.h, p.id photoId ${facePhotos} AND f.id = ?${photoVisibilityFilter(visibility, "p")}`,
@@ -110,6 +201,10 @@ export const mergePeople = db.transaction((source: number, target: number, visib
     target,
   ]);
   db.run("UPDATE faces SET person_id = ? WHERE person_id = ?", [target, source]);
+  db.run("INSERT OR IGNORE INTO person_covers SELECT ?, photo_id FROM person_covers WHERE person_id = ?", [
+    target,
+    source,
+  ]);
   db.run("DELETE FROM people WHERE id = ?", [source]);
   return true;
 });

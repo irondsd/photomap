@@ -100,7 +100,7 @@ Sync runs on its own port (`PHOTOMAP_SYNC_PORT`), listening on the local network
 
 ## People preview
 
-The **People** tab groups photos by detected faces. Groups start unnamed. Open a group to add a name or use **Merge with…** to combine it with another group. The selected group keeps its name if it already has one. A photo can appear in more than one group, and two faces in the same photo count as one photo after a merge.
+The **People** tab groups photos by detected faces. Groups start unnamed. Open a group to see its date range, pick a cover, or show its geotagged photos on the map. Use **Merge with…** to combine it with another group. The selected group keeps its name and chosen cover when it has them. A photo can appear in more than one group, and two faces in the same photo count as one photo after a merge.
 
 Run the experiment against a SQLite backup. Use a fresh trial directory for each snapshot so any earlier People results stay intact. SQLite's backup command includes committed changes from the live WAL.
 
@@ -117,12 +117,16 @@ PHOTOMAP_DATA="$PWD/data/people-trial" \
   PHOTOMAP_FACE_PYTHON="$PWD/data/people-trial/venv/bin/python" \
   bun run people:detect
 
-PHOTOMAP_DATA="$PWD/data/people-trial" PHOTOMAP_PEOPLE_PREVIEW=1 PORT=4757 bun run start
+PHOTOMAP_DATA="$PWD/data/people-trial" \
+  PHOTOMAP_FACE_PYTHON="$PWD/data/people-trial/venv/bin/python" \
+  PHOTOMAP_PEOPLE_PREVIEW=1 PHOTOMAP_PEOPLE_AUTO=1 PORT=4757 bun run start
 ```
 
-Open [People in the preview](http://127.0.0.1:4757/#view=people). The preview listens on loopback, disables phone sync, and permits People edits only. The detector reads indexed photos and RAW images locally, including private photos. The normal visibility filter applies to groups, photo counts, and cover images. Videos and files marked missing are skipped.
+Open [People in the preview](http://127.0.0.1:4757/#view=people). The preview listens on loopback and supports People edits and rescans of its registered folders. Phone sync is disabled. The detector reads indexed photos and RAW images locally, including private photos. The normal visibility filter applies to groups, dates, photo counts, and cover images. Videos and files marked missing are skipped.
 
-The detector saves progress in batches. Run the same command again to resume or to analyze newly indexed or changed photos in the copy. Use `bun run people:detect --retry-failed` with the same environment to retry unreadable files. Use **Refresh** in People to see the latest results. The copy contains the face embeddings and any names you enter.
+With automatic detection enabled, use **Library → Rescan all folders** in the preview to pick up new photos in the registered folders. The preview checks its own index for new or changed files and matches them in the background. Matches use the existing groups, including your merges. Uncertain faces can start new groups. The preview has its own index, so changes indexed only by the regular app appear after a preview rescan.
+
+The detector saves progress in batches. You can run `bun run people:detect` again to resume or process pending photos manually. Add `--retry-failed` with the same environment to retry files that failed to process. The copy contains the face embeddings and your People edits.
 
 ## How it works
 

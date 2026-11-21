@@ -12,7 +12,7 @@ requireCopiedIndex();
 const { db } = await import("../db");
 const { CPUS, DATA_DIR } = await import("../config");
 const { faceImage } = await import("./images");
-const { currentScan, facePhotos, initPeople } = await import("./store");
+const { pendingFacePhotos, facePhotos, initPeople } = await import("./store");
 type Photo = Parameters<typeof faceImage>[0] & { size: number };
 type Face = FaceBox & { quality: number; embedding: number[] };
 
@@ -43,9 +43,7 @@ db.run("PRAGMA busy_timeout = 5000");
 const pending = db
   .query<Photo, []>(
     `SELECT p.id, p.path, p.kind, p.duration, p.mtime, p.size
-  FROM photos p LEFT JOIN face_scans s ON ${currentScan}
-  WHERE p.missing = 0 AND p.kind IN ('photo', 'raw') AND
-    (s.photo_id IS NULL${args.includes("--retry-failed") ? " OR s.failed = 1" : ""})
+  ${pendingFacePhotos} AND (s.photo_id IS NULL${args.includes("--retry-failed") ? " OR s.failed = 1" : ""})
   ORDER BY p.id`,
   )
   .all();

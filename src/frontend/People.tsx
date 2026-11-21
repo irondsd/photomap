@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import type { PeopleCatalog, PersonSummary } from "../people/store";
 import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
-import { AlbumDialog, albumRequest } from "./AlbumViews";
+import { AlbumDialog, albumDates, albumRequest, CoverPicker, type CoverPickerState } from "./AlbumViews";
+import type { Gallery } from "./Gallery";
 import { Icon, IconButton } from "./Icons";
 import { nf, type Points } from "./data";
 
 const PAGE_SIZE = 80;
-const label = (person: PersonSummary) => person.name ?? `Unnamed person ${person.id}`;
+export const personName = (person: PersonSummary) => person.name ?? `Unnamed person ${person.id}`;
 const photoCount = (count: number) => `${nf.format(count)} ${count === 1 ? "photo" : "photos"}`;
 const matches = (person: PersonSummary, term: string) =>
-  label(person).toLowerCase().includes(term.trim().toLowerCase());
+  personName(person).toLowerCase().includes(term.trim().toLowerCase());
 
 function Portrait({ person, visibility }: { person: PersonSummary; visibility: PhotoVisibility }) {
   const url = withPhotoVisibility(`/api/faces/${person.coverId}/cover`, visibility);
@@ -17,6 +18,7 @@ function Portrait({ person, visibility }: { person: PersonSummary; visibility: P
     <span className="album-cover person-portrait">
       <Icon name="person" />
       <img
+        key={person.coverId}
         src={url}
         alt=""
         loading="lazy"
@@ -30,32 +32,45 @@ function Portrait({ person, visibility }: { person: PersonSummary; visibility: P
 
 export function PeopleView({
   personId,
+  person,
+  membership,
+  hasLocations,
+  personError,
   visibility,
   points,
-  indexOf,
+  revision,
+  reload,
   onOpen,
   onBack,
+  onMap,
   onMerged,
   renderGallery,
 }: {
   personId: number | null;
+  person: PersonSummary | undefined;
+  membership: Uint8Array | null;
+  hasLocations: boolean | null;
+  personError: string;
   visibility: PhotoVisibility;
   points: Points | null;
-  indexOf(id: number): number | undefined;
+  revision: number;
+  reload(): void;
   onOpen(id: number): void;
   onBack(): void;
-  onMerged(id: number, refresh: () => void): void;
-  renderGallery(membership: Uint8Array, paused: boolean): ReactNode;
+  onMap(): void;
+  onMerged(id: number): void;
+  renderGallery(
+    membership: Uint8Array,
+    paused: boolean,
+    picker?: ComponentProps<typeof Gallery>["coverPicker"],
+  ): ReactNode;
 }) {
   const [catalog, setCatalog] = useState<PeopleCatalog | null>(null);
-  const [members, setMembers] = useState<{ personId: number; ids: number[] } | null>(null);
   const [catalogError, setCatalogError] = useState("");
-  const [membersError, setMembersError] = useState<{ personId: number; message: string } | null>(null);
-  const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [edit, setEdit] = useState<"name" | "merge" | null>(null);
-  const reload = () => setRevision((value) => value + 1);
+  const [cover, setCover] = useState<Omit<CoverPickerState, "onSave" | "onCancel"> | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -70,33 +85,33 @@ export function PeopleView({
     return () => controller.abort();
   }, [points, revision, visibility]);
 
+  useEffect(() => setCover(null), [personId]);
   useEffect(() => {
-    if (personId == null) return;
-    const controller = new AbortController();
-    setMembersError(null);
-    albumRequest<number[]>(withPhotoVisibility(`people/${personId}`, visibility), "GET", undefined, controller.signal)
-      .then((ids) => {
-        if (!controller.signal.aborted) setMembers({ personId, ids });
-      })
-      .catch((error: Error) => {
-        if (!controller.signal.aborted) setMembersError({ personId, message: error.message });
-      });
-    return () => controller.abort();
-  }, [personId, points, revision, visibility]);
+    if (!cover || cover.saving) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCover(null);
+    };
+    window.addEventListener("keydown", cancel);
+    return () => window.removeEventListener("keydown", cancel);
+  }, [cover]);
 
-  const person = catalog?.people.find((entry) => entry.id === personId);
-  const membership = useMemo(() => {
-    if (personId == null || !points || members?.personId !== personId) return null;
-    const mask = new Uint8Array(points.n);
-    for (const id of members.ids) {
-      const index = indexOf(id);
-      if (index != null) mask[index] = 1;
+  const saveCover = async () => {
+    if (!person || !cover || cover.candidate == null || cover.saving) return;
+    const saving = { ...cover, saving: true, error: "" };
+    setCover(saving);
+    try {
+      await albumRequest(withPhotoVisibility(`people/${person.id}/cover`, visibility), "PUT", {
+        photoId: cover.candidate,
+      });
+      setCover((current) => (current === saving ? null : current));
+      reload();
+    } catch (error) {
+      setCover((current) => (current === saving ? { ...cover, error: (error as Error).message } : current));
     }
-    return mask;
-  }, [personId, points, members, indexOf]);
+  };
 
   const matching = useMemo(() => catalog?.people.filter((entry) => matches(entry, query)) ?? [], [catalog, query]);
-  const issue = catalogError || (membersError?.personId === personId ? membersError?.message : "");
+  const issue = personId == null ? catalogError : personError;
   const status = issue ? (
     <div className="empty">
       <p role="alert">{issue}</p>
@@ -152,8 +167,10 @@ export function PeopleView({
               {matching.slice(0, limit).map((entry) => (
                 <button className="album-card" key={entry.id} onClick={() => onOpen(entry.id)}>
                   <Portrait person={entry} visibility={visibility} />
-                  <strong>{label(entry)}</strong>
-                  <span className="album-card-meta dim">{photoCount(entry.count)}</span>
+                  <strong>{personName(entry)}</strong>
+                  <span className="album-card-meta dim">
+                    {photoCount(entry.count)} · {albumDates(entry)}
+                  </span>
                 </button>
               ))}
             </div>
@@ -179,34 +196,69 @@ export function PeopleView({
           <IconButton name="back" label="All people" onClick={onBack} />
           {person && <Portrait key={person.coverId} person={person} visibility={visibility} />}
           <div>
-            <h1>{person ? label(person) : "Person"}</h1>
-            {person && <p className="dim">{photoCount(person.count)}</p>}
+            <h1>{person ? personName(person) : "Person"}</h1>
+            {person && (
+              <p className="dim">
+                {photoCount(person.count)} · {albumDates(person)}
+              </p>
+            )}
           </div>
         </div>
         {person && (
-          <div className="album-heading-actions">
-            <button className="btn" onClick={() => setEdit("name")}>
-              {person.name ? "Rename" : "Add name"}
-            </button>
-            <button className="btn" onClick={() => setEdit("merge")} disabled={catalog!.people.length < 2}>
-              Merge with…
-            </button>
+          <div className="album-action-slot">
+            <div className="album-heading-actions" inert={cover != null}>
+              <button
+                className="btn album-action"
+                disabled={!membership}
+                onClick={() => setCover({ candidate: null, saving: false, error: "" })}
+              >
+                <Icon name="album" /> Pick cover
+              </button>
+              <button className="btn" onClick={() => setEdit("name")}>
+                {person.name ? "Rename" : "Add name"}
+              </button>
+              <button className="btn" onClick={() => setEdit("merge")} disabled={(catalog?.people.length ?? 0) < 2}>
+                Merge with…
+              </button>
+              <button className="btn album-action" disabled={!hasLocations} onClick={onMap}>
+                <Icon name="map" /> Show on map
+              </button>
+              {hasLocations === false && <span className="dim small">No locations for this person</span>}
+            </div>
+            <CoverPicker
+              title="Pick person cover"
+              current={person.coverPhotoId}
+              selection={cover ? { ...cover, onSave: saveCover, onCancel: () => setCover(null) } : undefined}
+            />
           </div>
         )}
       </header>
-      {issue || !person || !membership ? status : renderGallery(membership, edit != null)}
-      {edit && person && catalog && (
+      {issue || !person || !membership
+        ? status
+        : renderGallery(
+            membership,
+            edit != null,
+            cover
+              ? {
+                  current: person.coverPhotoId,
+                  candidate: cover.candidate,
+                  saving: cover.saving,
+                  onPick: (id) => setCover((draft) => draft && { ...draft, candidate: id, error: "" }),
+                }
+              : undefined,
+          )}
+      {edit && person && (
         <PersonDialog
           key={`${person.id}:${edit}`}
           action={edit}
           person={person}
-          people={catalog.people}
+          people={catalog?.people ?? []}
           visibility={visibility}
           onClose={() => setEdit(null)}
           onSave={(target) => {
             setEdit(null);
             if (target == null) reload();
-            else onMerged(target, reload);
+            else onMerged(target);
           }}
         />
       )}
@@ -284,7 +336,7 @@ function PersonDialog({
                 >
                   <Portrait person={entry} visibility={visibility} />
                   <span>
-                    <strong>{label(entry)}</strong>
+                    <strong>{personName(entry)}</strong>
                     <small className="dim">{photoCount(entry.count)}</small>
                   </span>
                 </button>
@@ -298,8 +350,8 @@ function PersonDialog({
             </div>
             {selected && (
               <p role="status">
-                Combine {label(person)} and {label(selected)} under{" "}
-                <strong>{selected.name ?? person.name ?? label(selected)}</strong>.
+                Combine {personName(person)} and {personName(selected)} under{" "}
+                <strong>{selected.name ?? person.name ?? personName(selected)}</strong>.
               </p>
             )}
           </>

@@ -8,11 +8,12 @@ import { Sidebar, type SidebarTab } from "./Sidebar";
 import { Viewer } from "./Viewer";
 import { AddFolder, Library, ScanProgress, type ScanStatus, type Stats } from "./Library";
 import { Gallery } from "./Gallery";
-import { PeopleView } from "./People";
+import { PeopleView, personName } from "./People";
 import { albumRequest, AlbumEditDialog, AlbumHeader, AlbumList, AlbumPicker } from "./AlbumViews";
 import { Icon, IconButton } from "./Icons";
 import { afterOverlayClose } from "./history";
 import type { AlbumCatalog, AlbumSummary } from "../albums";
+import type { PersonDetail } from "../people/store";
 import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
 import { HidePrivateContext, PhotoVisibilityContext } from "./photoVisibility";
 
@@ -22,6 +23,11 @@ interface Destination {
   mode: Mode;
   album: number | null;
   person?: number | null;
+}
+
+function mapGroup(album: number | null, person: number | null) {
+  if (person != null) return `person:${person}`;
+  return album == null ? null : `album:${album}`;
 }
 
 // ---------------------------------------------------------------- URL state
@@ -50,7 +56,8 @@ function readHash(allowPrivate = false): HashState {
         : v === "gallery" || v === "people"
           ? null
           : album,
-    person: v === "people" && Number.isSafeInteger(person) && person > 0 ? person : null,
+    person:
+      (v === "people" || (v === "map" && album == null)) && Number.isSafeInteger(person) && person > 0 ? person : null,
     map: m && m.length === 3 && m.every(Number.isFinite) ? { center: [m[1]!, m[0]!], zoom: m[2]! } : null,
     t: t && t.length === 2 && t.every(Number.isFinite) && t[0]! < t[1]! ? [t[0]!, t[1]!] : null,
   };
@@ -308,7 +315,13 @@ export function App() {
   const privacyChannel = useRef<BroadcastChannel | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const mapPosition = useRef<HashState["map"]>(null);
-  const pendingAlbumFit = useRef(mode === "map" && !initialHash.map ? albumId : null);
+  const pendingGroupFit = useRef(mode === "map" && !initialHash.map ? mapGroup(albumId, personId) : null);
+  const [personData, setPersonData] = useState<{ key: string; value?: PersonDetail; error?: string } | null>(null);
+  const [peopleRevision, setPeopleRevision] = useState(0);
+  const peopleChanged = () => setPeopleRevision((value) => value + 1);
+  const personKey = `${dataKey}:${personId}`;
+  const personDetail = personData?.key === personKey ? personData.value : undefined;
+  const personError = personData?.key === personKey ? (personData.error ?? "") : "";
   const [photoFocus, setPhotoFocus] = useState<{ center: [number, number]; id: number } | null>(null);
   const clientRef = useRef<ClusterClient | null>(null);
   const clusterFilter = useRef<{ points: Points; membership: Uint8Array | null } | null>(null);
@@ -424,6 +437,23 @@ export function App() {
     return m;
   }, [points]);
   const indexOf = useCallback((id: number) => idIndex.get(id), [idIndex]);
+  useEffect(() => {
+    if (personId == null) return;
+    const controller = new AbortController();
+    albumRequest<PersonDetail>(
+      withPhotoVisibility(`people/${personId}/detail`, visibility),
+      "GET",
+      undefined,
+      controller.signal,
+    )
+      .then((value) => {
+        if (!controller.signal.aborted) setPersonData({ key: personKey, value });
+      })
+      .catch((error: Error) => {
+        if (!controller.signal.aborted) setPersonData({ key: personKey, error: error.message });
+      });
+    return () => controller.abort();
+  }, [personId, personKey, visibility, points, peopleRevision]);
   const pickingCover = mode === "albums" && coverDraft?.albumId === albumId ? coverDraft : null;
   const canPickCover = albumIds?.some((id) => {
     const i = indexOf(id);
@@ -485,13 +515,29 @@ export function App() {
     }
     return mask;
   }, [albumId, albumIds, idIndex, points, privateOpen]);
-  const mapAlbumMask = mode === "map" ? albumMask : null;
+  const personMask = useMemo(() => {
+    if (!points || personId == null) return null;
+    const mask = new Uint8Array(points.n);
+    for (const id of personDetail?.ids ?? []) {
+      const index = indexOf(id);
+      if (index != null) mask[index] = 1;
+    }
+    return mask;
+  }, [points, personId, personDetail, indexOf]);
+  const personBounds = useMemo(
+    () => (points && personMask && personDetail ? boundsOf(points, null, ALL_KINDS, personMask) : null),
+    [points, personMask, personDetail],
+  );
+  const mapMembership = mode === "map" ? (personMask ?? albumMask) : null;
+  const groupKey = mapGroup(albumId, personId);
   const result =
-    clusterQuery?.points === points && clusterQuery.membership === mapAlbumMask ? clusterQuery.result : EMPTY_RESULT;
+    clusterQuery?.points === points && clusterQuery.membership === mapMembership ? clusterQuery.result : EMPTY_RESULT;
   const albumBounds = useMemo(
     () => (points && albumMask && albumIds ? boundsOf(points, null, ALL_KINDS, albumMask) : null),
     [points, albumMask, albumIds],
   );
+
+  const groupBounds = personId != null ? personBounds : albumBounds;
 
   // Poll scan status while a scan runs; reload the index as it lands.
   const pollScan = useCallback(async () => {
@@ -538,10 +584,10 @@ export function App() {
   }, [points]);
 
   useEffect(() => {
-    clusterFilter.current = points ? { points, membership: mapAlbumMask } : null;
+    clusterFilter.current = points ? { points, membership: mapMembership } : null;
     if (!points) return;
-    clientRef.current!.filter(selection, kinds, mapAlbumMask);
-  }, [points, selection, kinds, mapAlbumMask]);
+    clientRef.current!.filter(selection, kinds, mapMembership);
+  }, [points, selection, kinds, mapMembership]);
 
   const onView = useCallback((bbox: BBox, zoom: number) => {
     const center = mapRef.current?.getCenter();
@@ -555,14 +601,14 @@ export function App() {
     if (!points) return EMPTY;
     const out: number[] = [];
     for (let i = points.n - 1; i >= 0; i--) {
-      if ((!mapAlbumMask || mapAlbumMask[i]) && Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds))
+      if ((!mapMembership || mapMembership[i]) && Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds))
         out.push(i);
     }
     // Undated photos sit at the end of the index; show them last.
     return Int32Array.from(
       out.sort((a, b) => (Number.isNaN(points.t[a]!) ? 1 : 0) - (Number.isNaN(points.t[b]!) ? 1 : 0)),
     );
-  }, [points, selection, kinds, mapAlbumMask]);
+  }, [points, selection, kinds, mapMembership]);
 
   const mapMask = useMemo(() => {
     if (!followMap || !points || !view) return null;
@@ -584,7 +630,7 @@ export function App() {
         mapPosition.current = h.map;
         mapRef.current?.jumpTo({ center: h.map.center, zoom: h.map.zoom });
       }
-      pendingAlbumFit.current = h.mode === "map" && !h.map ? h.album : null;
+      pendingGroupFit.current = h.mode === "map" && !h.map ? mapGroup(h.album, h.person) : null;
     };
     window.addEventListener("hashchange", onHash);
     window.addEventListener("popstate", onHash);
@@ -617,26 +663,26 @@ export function App() {
           setHover(i);
           setTimeout(() => setHoverPoint((h) => (h?.points === points && h.index === i ? null : h)), 3500);
         }
-      } else if (pendingAlbumFit.current != null && pendingAlbumFit.current === albumId && albumBounds) {
-        pendingAlbumFit.current = null;
-        map.fitBounds(albumBounds, { padding: 64, maxZoom: 14, duration: 700 });
+      } else if (pendingGroupFit.current != null && pendingGroupFit.current === groupKey && groupBounds) {
+        pendingGroupFit.current = null;
+        map.fitBounds(groupBounds, { padding: 64, maxZoom: 14, duration: 700 });
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [mode, mapHasView, albumId, albumBounds, indexOf, photoFocus, points, setHover]);
+  }, [mode, mapHasView, groupKey, groupBounds, indexOf, photoFocus, points, setHover]);
 
   // ------------------------------------------------------------ actions
   const fitToPhotos = useCallback(() => {
     if (!points || !mapRef.current) return;
-    const b = boundsOf(points, selection, kinds, mapAlbumMask);
+    const b = boundsOf(points, selection, kinds, mapMembership);
     if (b) mapRef.current.fitBounds(b, { padding: 80, maxZoom: 14, duration: 700 });
-  }, [points, selection, kinds, mapAlbumMask]);
+  }, [points, selection, kinds, mapMembership]);
 
-  const showAlbumMap = () => {
-    pendingAlbumFit.current = albumId;
+  const showGroupMap = () => {
+    pendingGroupFit.current = groupKey;
     setKinds(ALL_KINDS);
     setTab("map");
-    navigate("map", albumId, null);
+    navigate("map", albumId, null, false, personId);
   };
 
   const saveFavorite = async (id: number, favorite: boolean) => {
@@ -756,13 +802,13 @@ export function App() {
       const id = points.id[i]!;
       afterOverlayClose(() => {
         setTab("map");
-        pendingAlbumFit.current = null;
+        pendingGroupFit.current = null;
         setPhotoFocus({ center, id });
-        navigate("map", albumId === PRIVATE_ALBUM ? null : albumId);
+        navigate("map", albumId === PRIVATE_ALBUM ? null : albumId, selection, false, personId);
       });
       setViewer(null);
     },
-    [points, albumId, navigate],
+    [points, albumId, personId, selection, navigate],
   );
 
   useEffect(() => {
@@ -886,16 +932,31 @@ export function App() {
                   onReady={(m) => (mapRef.current = m)}
                 />
               )}
-              {mode === "map" && albumId != null && (
+              {mode === "map" && groupKey != null && (
                 <div className="map-album-filter">
                   <span>
-                    Viewing album <strong>{albumLabel}</strong>
+                    {personId != null ? (
+                      <>
+                        Viewing photos of{" "}
+                        <strong>
+                          {personDetail
+                            ? personName(personDetail.person)
+                            : personError
+                              ? "Person unavailable"
+                              : "Loading person…"}
+                        </strong>
+                      </>
+                    ) : (
+                      <>
+                        Viewing album <strong>{albumLabel}</strong>
+                      </>
+                    )}
                   </span>
                   <IconButton
                     name="close"
-                    label="Clear album filter"
+                    label={personId == null ? "Clear album filter" : "Clear person filter"}
                     onClick={() => {
-                      pendingAlbumFit.current = null;
+                      pendingGroupFit.current = null;
                       navigate("map", null, selection, true);
                     }}
                   />
@@ -931,7 +992,7 @@ export function App() {
                 selection={selection}
                 onSelect={setSelection}
                 mapMask={mapMask}
-                membership={mapAlbumMask}
+                membership={mapMembership}
                 followMap={followMap}
                 onFollowMap={setFollowMap}
                 hoverT={hover != null ? points.t[hover]! : null}
@@ -1000,16 +1061,22 @@ export function App() {
             personId={personId}
             visibility={visibility}
             points={points}
-            indexOf={indexOf}
+            person={personDetail?.person}
+            membership={personDetail ? personMask : null}
+            hasLocations={personDetail && points ? personBounds != null : null}
+            personError={personError}
+            revision={peopleRevision}
+            reload={peopleChanged}
             onOpen={(id) => navigate("people", null, selection, false, id)}
+            onMap={showGroupMap}
             onBack={backToPeople}
-            onMerged={(id, reload) =>
+            onMerged={(id) =>
               afterOverlayClose(() => {
                 navigate("people", null, selection, true, id);
-                reload();
+                peopleChanged();
               })
             }
-            renderGallery={(membership, editingPerson) =>
+            renderGallery={(membership, editingPerson, coverPicker) =>
               points && (
                 <Gallery
                   points={points}
@@ -1021,6 +1088,7 @@ export function App() {
                   onLocationsChanged={refresh}
                   favorites={favorites}
                   membership={membership}
+                  coverPicker={coverPicker}
                   onAddToAlbum={openAlbumPicker}
                   onChangePrivacy={changePrivacy}
                 />
@@ -1070,7 +1138,7 @@ export function App() {
                 album={activeAlbum}
                 hasLocations={albumIds && points ? albumBounds != null : null}
                 onBack={backToAlbums}
-                onMap={showAlbumMap}
+                onMap={showGroupMap}
                 onRename={() => setAlbumEdit({ album: activeAlbum, remove: false })}
                 onDelete={() => setAlbumEdit({ album: activeAlbum, remove: true })}
                 onPickCover={

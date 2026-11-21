@@ -19,7 +19,7 @@ export async function albumRequest<T>(path: string, method = "GET", body?: objec
   return response.json();
 }
 
-export function albumDates(album: AlbumSummary): string {
+export function albumDates(album: Pick<AlbumSummary, "first" | "last" | "count">): string {
   const label = (date: AlbumDate) => (date.yearOnly ? formatYear(date.time) : formatDate(date.time));
   if (!album.first || !album.last) return album.count ? "Dates unknown" : "";
   const first = label(album.first);
@@ -104,21 +104,9 @@ export function AlbumHeader({
   onRename(): void;
   onDelete(): void;
   onPickCover?: () => void;
-  coverPicker?: {
-    candidate: number | null;
-    saving: boolean;
-    error: string;
-    onSave(): void;
-    onCancel(): void;
-  };
+  coverPicker?: CoverPickerState;
 }) {
-  const { thumbnail } = usePhotoUrls();
-  const previewCover = coverPicker?.candidate ?? album.coverId;
   const picking = coverPicker != null;
-  const cancelButton = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    if (picking) cancelButton.current?.focus({ preventScroll: true });
-  }, [picking]);
   return (
     <header className="album-heading album-detail-heading">
       <div className="album-title">
@@ -144,38 +132,61 @@ export function AlbumHeader({
           </button>
           {!!album.count && hasLocations === false && <span className="dim small">No locations in this album</span>}
         </div>
-        {album.id !== 0 && (
-          <div className="cover-picker-controls" inert={!picking}>
-            <div className="cover-picker-preview" aria-hidden="true">
-              {picking && previewCover != null ? (
-                <img src={thumbnail(previewCover, "m")} alt="" />
-              ) : (
-                <Icon name="album" />
-              )}
-            </div>
-            <div className="cover-picker-copy">
-              <strong>Pick album cover</strong>
-              <p className="dim">Select a photo, then save your choice.</p>
-            </div>
-            <button className="btn" ref={cancelButton} onClick={coverPicker?.onCancel} disabled={coverPicker?.saving}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary cover-picker-save"
-              onClick={coverPicker?.onSave}
-              disabled={coverPicker?.saving || coverPicker?.candidate == null}
-            >
-              {coverPicker?.saving ? "Saving…" : "Save cover"}
-            </button>
-            {coverPicker?.error && (
-              <p className="cover-picker-error error" role="alert">
-                {coverPicker.error}
-              </p>
-            )}
-          </div>
-        )}
+        {album.id !== 0 && <CoverPicker title="Pick album cover" current={album.coverId} selection={coverPicker} />}
       </div>
     </header>
+  );
+}
+
+export interface CoverPickerState {
+  candidate: number | null;
+  saving: boolean;
+  error: string;
+  onSave(): void;
+  onCancel(): void;
+}
+
+export function CoverPicker({
+  title,
+  current,
+  selection,
+}: {
+  title: string;
+  current: number | null;
+  selection?: CoverPickerState;
+}) {
+  const { thumbnail } = usePhotoUrls();
+  const previewCover = selection?.candidate ?? current;
+  const picking = selection != null;
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (picking) cancelButton.current?.focus({ preventScroll: true });
+  }, [picking]);
+  return (
+    <div className="cover-picker-controls" inert={!picking}>
+      <div className="cover-picker-preview" aria-hidden="true">
+        {picking && previewCover != null ? <img src={thumbnail(previewCover, "m")} alt="" /> : <Icon name="album" />}
+      </div>
+      <div className="cover-picker-copy">
+        <strong>{title}</strong>
+        <p className="dim">Select a photo, then save your choice.</p>
+      </div>
+      <button className="btn" ref={cancelButton} onClick={selection?.onCancel} disabled={selection?.saving}>
+        Cancel
+      </button>
+      <button
+        className="btn btn-primary cover-picker-save"
+        onClick={selection?.onSave}
+        disabled={selection?.saving || selection?.candidate == null}
+      >
+        {selection?.saving ? "Saving…" : "Save cover"}
+      </button>
+      {selection?.error && (
+        <p className="cover-picker-error error" role="alert">
+          {selection.error}
+        </p>
+      )}
+    </div>
   );
 }
 

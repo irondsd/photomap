@@ -1,7 +1,18 @@
 import { join } from "node:path";
 import index from "./frontend/index.html";
 import { HOST, PORT, CPUS, PEOPLE_PREVIEW } from "./config";
-import { listPeople, mergePeople, namePerson, personPhotos, visibleFace } from "./people/store";
+import {
+  hasPeople,
+  initPeople,
+  listPeople,
+  mergePeople,
+  namePerson,
+  personDetail,
+  personPhotos,
+  setPersonCover,
+  visibleFace,
+} from "./people/store";
+import { watchForNewPhotos } from "./people/auto";
 import { faceCover } from "./people/images";
 import {
   albumCatalog,
@@ -43,7 +54,9 @@ import { withPhotoVisibility, type PhotoVisibility } from "./photo-visibility";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
+const peopleAuto = PEOPLE_PREVIEW && process.env.PHOTOMAP_PEOPLE_AUTO === "1";
 if (PEOPLE_PREVIEW) db.run("PRAGMA busy_timeout = 5000");
+if (hasPeople() || peopleAuto) initPeople();
 
 /** Bumped whenever the index changes so the client knows to refetch points. */
 let dataVersion = Date.now();
@@ -57,13 +70,11 @@ type Handler<R extends Request> = (req: R) => Response | Promise<Response>;
 function guard<R extends Request>(h: Handler<R>): Handler<R> {
   return (req) => {
     if (forbidden(req)) return new Response("Forbidden", { status: 403 });
-    if (
-      PEOPLE_PREVIEW &&
-      req.method !== "GET" &&
-      req.method !== "HEAD" &&
-      !new URL(req.url).pathname.startsWith("/api/people/")
-    ) {
-      return bad("Only People edits are available in this preview.", 403);
+    if (PEOPLE_PREVIEW && req.method !== "GET" && req.method !== "HEAD") {
+      const { pathname } = new URL(req.url);
+      if (pathname !== "/api/scan" && !pathname.startsWith("/api/people/")) {
+        return bad("This preview allows library scans and People edits.", 403);
+      }
     }
     return h(req);
   };
@@ -218,7 +229,9 @@ async function runScans(targets: ScanTarget[]) {
     }
   }
   // Background thumbnails at half capacity, leaving room for on-demand requests.
-  if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));
+  if (!PEOPLE_PREVIEW && !process.env.PHOTOMAP_NO_PREGEN) {
+    void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));
+  }
 }
 
 /** Indexes what the phone just sent: the sync folder becomes a library folder on first use. */
@@ -364,6 +377,28 @@ const server = Bun.serve({
         return mergePeople.immediate(source, target, photoVisibility(req))
           ? json({ ok: true })
           : bad("One of these people is no longer available.", 409);
+      }),
+    },
+
+    "/api/people/:id/detail": {
+      GET: guard((req) => {
+        const id = idParam(req.params.id);
+        const result = id && personDetail(id, photoVisibility(req));
+        return result ? json(result, { headers: noStore }) : bad("Person not found", 404);
+      }),
+    },
+
+    "/api/people/:id/cover": {
+      PUT: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { photoId?: unknown } | null;
+        const photoId = body?.photoId;
+        if (!id || typeof photoId !== "number" || !Number.isSafeInteger(photoId) || photoId <= 0) {
+          return bad("Choose a photo from this person’s group.");
+        }
+        return setPersonCover.immediate(id, photoId, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("This photo is no longer available in the group.", 409);
       }),
     },
 
@@ -886,6 +921,7 @@ const publicHost = process.env.PHOTOMAP_ALLOWED_HOSTS?.split(",")[0]?.trim() || 
 console.log(`Photomap running at http://${publicHost}`);
 
 if (!PEOPLE_PREVIEW) resumeSync(scanSynced);
+if (peopleAuto) watchForNewPhotos(() => scanStatus.running);
 
 // Catch up on thumbnails a previous run (or a CLI scan) didn't generate.
 if (!PEOPLE_PREVIEW && !process.env.PHOTOMAP_NO_PREGEN) {

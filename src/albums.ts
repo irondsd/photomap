@@ -23,7 +23,8 @@ export interface AlbumCatalog {
 export const FAVORITES_ID = 0;
 
 // Match the gallery's treatment of file modification dates and unknown dates.
-const taken = "CASE WHEN p.time_source IS NOT NULL AND p.time_source <> 'mtime' THEN p.taken_local END";
+export const collectionTaken =
+  "CASE WHEN p.time_source IS NOT NULL AND p.time_source <> 'mtime' THEN p.taken_local END";
 
 interface Member {
   albumId: number;
@@ -32,7 +33,7 @@ interface Member {
   source: string | null;
 }
 
-const memberDate = (m: Member): AlbumDate | null =>
+export const memberDate = (m: Pick<Member, "time" | "source">): AlbumDate | null =>
   m.time == null ? null : { time: m.time, yearOnly: m.source === "folder" };
 
 export function albumCatalog(visibility: PhotoVisibility = "public"): AlbumCatalog {
@@ -48,10 +49,10 @@ export function albumCatalog(visibility: PhotoVisibility = "public"): AlbumCatal
   const members = db
     .query<Member, []>(
       `
-    SELECT ap.album_id AS albumId, p.id, ${taken} AS time, p.time_source AS source
+    SELECT ap.album_id AS albumId, p.id, ${collectionTaken} AS time, p.time_source AS source
     FROM album_photos ap JOIN photos p ON p.id = ap.photo_id WHERE p.missing = 0${scope}
     UNION ALL
-    SELECT 0, p.id, ${taken}, p.time_source
+    SELECT 0, p.id, ${collectionTaken}, p.time_source
     FROM favorites f JOIN photos p ON p.id = f.photo_id WHERE p.missing = 0${scope}
     ORDER BY 3, 2
   `,
