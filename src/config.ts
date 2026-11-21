@@ -1,13 +1,17 @@
 import { join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { availableParallelism, homedir } from "node:os";
+import { requireCopiedIndex } from "./people/trial";
+
+export const PEOPLE_PREVIEW = process.env.PHOTOMAP_PEOPLE_PREVIEW === "1";
+if (PEOPLE_PREVIEW) requireCopiedIndex();
 
 export const DATA_DIR = resolve(process.env.PHOTOMAP_DATA ?? join(import.meta.dir, "..", "data"));
 export const DB_PATH = join(DATA_DIR, "index.sqlite");
 export const THUMB_DIR = join(DATA_DIR, "thumbs");
 
 export const PORT = Number(process.env.PORT ?? 4747);
-export const HOST = process.env.HOST ?? "127.0.0.1";
+export const HOST = PEOPLE_PREVIEW ? "127.0.0.1" : (process.env.HOST ?? "127.0.0.1");
 
 /** Phone sync listens on the local network on its own port, serving only the token-protected sync API. */
 export const SYNC_PORT = Number(process.env.PHOTOMAP_SYNC_PORT ?? PORT + 1);

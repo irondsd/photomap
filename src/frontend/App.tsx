@@ -8,6 +8,7 @@ import { Sidebar, type SidebarTab } from "./Sidebar";
 import { Viewer } from "./Viewer";
 import { AddFolder, Library, ScanProgress, type ScanStatus, type Stats } from "./Library";
 import { Gallery } from "./Gallery";
+import { PeopleView } from "./People";
 import { albumRequest, AlbumEditDialog, AlbumHeader, AlbumList, AlbumPicker } from "./AlbumViews";
 import { Icon, IconButton } from "./Icons";
 import { afterOverlayClose } from "./history";
@@ -15,17 +16,19 @@ import type { AlbumCatalog, AlbumSummary } from "../albums";
 import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
 import { HidePrivateContext, PhotoVisibilityContext } from "./photoVisibility";
 
-type Mode = "map" | "gallery" | "albums";
+type Mode = "map" | "gallery" | "albums" | "people";
 const PRIVATE_ALBUM = -1;
 interface Destination {
   mode: Mode;
   album: number | null;
+  person?: number | null;
 }
 
 // ---------------------------------------------------------------- URL state
 interface HashState {
   mode: Mode | null;
   album: number | null;
+  person: number | null;
   map: { center: [number, number]; zoom: number } | null;
   t: Range | null;
 }
@@ -38,18 +41,26 @@ function readHash(allowPrivate = false): HashState {
   const rawAlbum = q.get("album");
   const parsedAlbum = rawAlbum ? Number(rawAlbum) : NaN;
   const album = Number.isSafeInteger(parsedAlbum) && parsedAlbum >= 0 ? parsedAlbum : null;
+  const person = Number(q.get("person"));
   return {
-    mode: v === "gallery" || v === "map" || v === "albums" ? v : null,
-    album: v === "albums" && rawAlbum === "private" && allowPrivate ? PRIVATE_ALBUM : v === "gallery" ? null : album,
+    mode: v === "gallery" || v === "map" || v === "albums" || v === "people" ? v : null,
+    album:
+      v === "albums" && rawAlbum === "private" && allowPrivate
+        ? PRIVATE_ALBUM
+        : v === "gallery" || v === "people"
+          ? null
+          : album,
+    person: v === "people" && Number.isSafeInteger(person) && person > 0 ? person : null,
     map: m && m.length === 3 && m.every(Number.isFinite) ? { center: [m[1]!, m[0]!], zoom: m[2]! } : null,
     t: t && t.length === 2 && t.every(Number.isFinite) && t[0]! < t[1]! ? [t[0]!, t[1]!] : null,
   };
 }
 
-function viewHash({ mode, album }: Destination, map: MlMap | null, t: Range | null) {
+function viewHash({ mode, album, person }: Destination, map: MlMap | null, t: Range | null) {
   const q = new URLSearchParams();
   q.set("view", mode);
   if (album != null) q.set("album", album === PRIVATE_ALBUM ? "private" : String(album));
+  if (person != null) q.set("person", String(person));
   if (map) {
     const c = map.getCenter();
     q.set("map", `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom().toFixed(2)}`);
@@ -201,7 +212,7 @@ const EMPTY_RESULT: ClusterResult = { clusters: [], visible: EMPTY, total: 0 };
 function savedMode(): Mode {
   try {
     const mode = localStorage.getItem("pm.view");
-    return mode === "gallery" || mode === "albums" ? mode : "map";
+    return mode === "gallery" || mode === "albums" || mode === "people" ? mode : "map";
   } catch {
     return "map";
   }
@@ -213,8 +224,9 @@ export function App() {
   const [destination, setDestination] = useState<Destination>(() => ({
     mode: initialHash.mode ?? (initialHash.album != null ? "map" : savedMode()),
     album: initialHash.album,
+    person: initialHash.person,
   }));
-  const { mode, album: albumId } = destination;
+  const { mode, album: albumId, person: personId = null } = destination;
   const privateOpen = mode === "albums" && albumId === PRIVATE_ALBUM;
   const privateEntry = useRef(false);
   const [showPrivate, setShowPrivate] = useState(false);
@@ -232,7 +244,11 @@ export function App() {
   const [mapMounted, setMapMounted] = useState(mode === "map");
   const activate = useCallback((next: Destination) => {
     privateEntry.current = next.mode === "albums" && next.album === PRIVATE_ALBUM;
-    setDestination((current) => (current.mode === next.mode && current.album === next.album ? current : next));
+    setDestination((current) =>
+      current.mode === next.mode && current.album === next.album && (current.person ?? null) === (next.person ?? null)
+        ? current
+        : next,
+    );
     const m = next.mode;
     if (m === "gallery") setGalleryMounted(true);
     if (m === "map") setMapMounted(true);
@@ -299,23 +315,32 @@ export function App() {
   const loadedVersion = useRef<{ key: string; value: string } | null>(null);
 
   const navigate = useCallback(
-    (m: Mode, album: number | null = null, range = selection, replace = false) => {
-      const next = { mode: m, album };
+    (m: Mode, album: number | null = null, range = selection, replace = false, person: number | null = null) => {
+      const next = { mode: m, album, person };
       const hash = viewHash(next, mapRef.current, range);
       if (replace) history.replaceState(history.state, "", hash);
-      else if (m !== mode || album !== albumId) {
+      else if (m !== mode || album !== albumId || person !== personId) {
         history.replaceState(history.state, "", viewHash(destination, mapRef.current, selection));
         const fromAlbumIndex = m === "albums" && album != null && mode === "albums" && albumId == null;
-        history.pushState(fromAlbumIndex ? { fromAlbumIndex: true } : null, "", hash);
+        const fromPeopleIndex = person != null && mode === "people" && personId == null;
+        history.pushState(
+          fromAlbumIndex ? { fromAlbumIndex: true } : fromPeopleIndex ? { fromPeopleIndex: true } : null,
+          "",
+          hash,
+        );
       }
       activate(next);
       setSelection(range);
     },
-    [activate, albumId, destination, mode, selection],
+    [activate, albumId, destination, mode, personId, selection],
   );
   const backToAlbums = () => {
     if (history.state?.fromAlbumIndex) history.back();
     else navigate("albums", null, selection, true);
+  };
+  const backToPeople = () => {
+    if (history.state?.fromPeopleIndex) history.back();
+    else navigate("people", null, selection, true);
   };
 
   const hidePrivate = useCallback(() => {
@@ -553,7 +578,7 @@ export function App() {
   useEffect(() => {
     const onHash = () => {
       const h = readHash(privateEntry.current);
-      activate({ mode: h.mode ?? (h.album == null ? savedMode() : "map"), album: h.album });
+      activate({ mode: h.mode ?? (h.album == null ? savedMode() : "map"), album: h.album, person: h.person });
       setSelection(h.t);
       if (h.map) {
         mapPosition.current = h.map;
@@ -803,8 +828,17 @@ export function App() {
           >
             Albums
           </button>
+          <button
+            aria-pressed={mode === "people"}
+            onClick={() => {
+              if (mode === "people" && personId != null) backToPeople();
+              else navigate("people");
+            }}
+          >
+            People
+          </button>
         </div>
-        <div className="segmented segmented-kinds" role="group" aria-label="Media type">
+        <div className="segmented segmented-kinds" role="group" aria-label="Media type" hidden={mode === "people"}>
           {KIND_FILTERS.map((f) => (
             <button key={f.label} aria-pressed={kinds === f.mask} onClick={() => setKinds(f.mask)}>
               {f.label}
@@ -960,6 +994,40 @@ export function App() {
               )}
             </div>
           ))}
+        {mode === "people" && (
+          <PeopleView
+            key={dataKey}
+            personId={personId}
+            visibility={visibility}
+            points={points}
+            indexOf={indexOf}
+            onOpen={(id) => navigate("people", null, selection, false, id)}
+            onBack={backToPeople}
+            onMerged={(id, reload) =>
+              afterOverlayClose(() => {
+                navigate("people", null, selection, true, id);
+                reload();
+              })
+            }
+            renderGallery={(membership, editingPerson) =>
+              points && (
+                <Gallery
+                  points={points}
+                  kinds={1 | 2}
+                  active
+                  paused={paused || editingPerson}
+                  indexOf={indexOf}
+                  onOpen={openViewer}
+                  onLocationsChanged={refresh}
+                  favorites={favorites}
+                  membership={membership}
+                  onAddToAlbum={openAlbumPicker}
+                  onChangePrivacy={changePrivacy}
+                />
+              )
+            }
+          />
+        )}
         {privateOpen && (
           <div className="album-detail">
             <header className="album-heading album-detail-heading">

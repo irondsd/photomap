@@ -2324,6 +2324,39 @@ h4 {
   display: block;
 }
 
+.people-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.people-cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 144px), 1fr));
+}
+.person-portrait {
+  aspect-ratio: 1;
+}
+.album-title .person-portrait {
+  width: 48px;
+  flex: none;
+}
+.people-more {
+  display: flex;
+  justify-content: center;
+  padding: 0 16px 24px;
+}
+.people-merge-list {
+  display: grid;
+  gap: 3px;
+  overflow: auto;
+  max-height: min(280px, 34dvh);
+  padding: 3px;
+}
+.people-merge-list button[aria-pressed="true"] {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .map-album-filter {
   position: absolute;
   z-index: 2;

@@ -1,6 +1,12 @@
 import type { ComponentPropsWithRef } from "react";
 
 const paths = {
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20v-2a7 7 0 0 1 14 0v2" />
+    </>
+  ),
   star: <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" />,
   edit: <path d="m15 5 4 4M4 20l4.5-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z" />,
   info: (

@@ -98,6 +98,32 @@ The phone lists its photos from that date, the server says which ones it doesn't
 
 Sync runs on its own port (`PHOTOMAP_SYNC_PORT`), listening on the local network. It serves only the sync API, which requires the token from the pairing code; the rest of Photomap stays on localhost. **Unpair all phones** issues a new token. Turning sync off closes the port, and the setting is remembered across restarts.
 
+## People preview
+
+The **People** tab groups photos by detected faces. Groups start unnamed. Open a group to add a name or use **Merge with…** to combine it with another group. The selected group keeps its name if it already has one. A photo can appear in more than one group, and two faces in the same photo count as one photo after a merge.
+
+Run the experiment against a SQLite backup. Use a fresh trial directory for each snapshot so any earlier People results stay intact. SQLite's backup command includes committed changes from the live WAL.
+
+```sh
+umask 077
+mkdir -p data/people-trial/models
+sqlite3 -readonly data/index.sqlite ".backup data/people-trial/index.sqlite"
+python3 -m venv data/people-trial/venv
+data/people-trial/venv/bin/pip install opencv-python-headless==5.1.0.95
+curl -fL https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx -o data/people-trial/models/yunet.onnx
+curl -fL https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx -o data/people-trial/models/sface.onnx
+
+PHOTOMAP_DATA="$PWD/data/people-trial" \
+  PHOTOMAP_FACE_PYTHON="$PWD/data/people-trial/venv/bin/python" \
+  bun run people:detect
+
+PHOTOMAP_DATA="$PWD/data/people-trial" PHOTOMAP_PEOPLE_PREVIEW=1 PORT=4757 bun run start
+```
+
+Open [People in the preview](http://127.0.0.1:4757/#view=people). The preview listens on loopback, disables phone sync, and permits People edits only. The detector reads indexed photos and RAW images locally, including private photos. The normal visibility filter applies to groups, photo counts, and cover images. Videos and files marked missing are skipped.
+
+The detector saves progress in batches. Run the same command again to resume or to analyze newly indexed or changed photos in the copy. Use `bun run people:detect --retry-failed` with the same environment to retry unreadable files. Use **Refresh** in People to see the latest results. The copy contains the face embeddings and any names you enter.
+
 ## How it works
 
 ```

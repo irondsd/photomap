@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import index from "./frontend/index.html";
-import { HOST, PORT, CPUS } from "./config";
+import { HOST, PORT, CPUS, PEOPLE_PREVIEW } from "./config";
+import { listPeople, mergePeople, namePerson, personPhotos, visibleFace } from "./people/store";
+import { faceCover } from "./people/images";
 import {
   albumCatalog,
   albumPhotoIds,
@@ -41,6 +43,8 @@ import { withPhotoVisibility, type PhotoVisibility } from "./photo-visibility";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
+if (PEOPLE_PREVIEW) db.run("PRAGMA busy_timeout = 5000");
+
 /** Bumped whenever the index changes so the client knows to refetch points. */
 let dataVersion = Date.now();
 
@@ -51,7 +55,18 @@ const currentVersion = () => `${dataVersion}.${dbVersionStmt.get()!.data_version
 // ---------------------------------------------------------------- security
 type Handler<R extends Request> = (req: R) => Response | Promise<Response>;
 function guard<R extends Request>(h: Handler<R>): Handler<R> {
-  return (req) => (forbidden(req) ? new Response("Forbidden", { status: 403 }) : h(req));
+  return (req) => {
+    if (forbidden(req)) return new Response("Forbidden", { status: 403 });
+    if (
+      PEOPLE_PREVIEW &&
+      req.method !== "GET" &&
+      req.method !== "HEAD" &&
+      !new URL(req.url).pathname.startsWith("/api/people/")
+    ) {
+      return bad("Only People edits are available in this preview.", 403);
+    }
+    return h(req);
+  };
 }
 
 const json = (data: unknown, init?: ResponseInit) => Response.json(data, init);
@@ -314,6 +329,55 @@ const server = Bun.serve({
 
     "/api/stats": {
       GET: guard((req) => json({ ...stats(photoVisibility(req)), version: currentVersion() }, { headers: noStore })),
+    },
+
+    "/api/people": {
+      GET: guard((req) => json(listPeople(photoVisibility(req)), { headers: noStore })),
+    },
+
+    "/api/people/:id": {
+      GET: guard((req) => {
+        const id = idParam(req.params.id);
+        const photos = id && personPhotos(id, photoVisibility(req));
+        return photos ? json(photos, { headers: noStore }) : bad("Person not found", 404);
+      }),
+      PATCH: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+        if (!id || typeof body?.name !== "string" || body.name.trim().length > 120) {
+          return bad("Enter a person name up to 120 characters.");
+        }
+        return namePerson.immediate(id, body.name.trim() || null, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("Person not found", 404);
+      }),
+    },
+
+    "/api/people/:id/merge": {
+      POST: guard(async (req) => {
+        const source = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { target?: unknown } | null;
+        const target = body?.target;
+        if (!source || typeof target !== "number" || !Number.isSafeInteger(target) || target < 1 || target === source) {
+          return bad("Choose another person to merge into.");
+        }
+        return mergePeople.immediate(source, target, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("One of these people is no longer available.", 409);
+      }),
+    },
+
+    "/api/faces/:id/cover": {
+      GET: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const visibility = photoVisibility(req);
+        const face = id && visibleFace(id, visibility);
+        const photo = face && visiblePhoto(face.photoId, visibility);
+        if (!photo || !face) return bad("Face not found", 404);
+        const cover = await faceCover(photo, face).catch(() => null);
+        if (!cover || !visibleFace(id!, visibility)) return bad("Face not available", 404);
+        return new Response(new Uint8Array(cover), { headers: { ...noStore, "content-type": "image/jpeg" } });
+      }),
     },
 
     "/api/albums": {
@@ -821,7 +885,9 @@ const server = Bun.serve({
 const publicHost = process.env.PHOTOMAP_ALLOWED_HOSTS?.split(",")[0]?.trim() || `photomap.localhost:${server.port}`;
 console.log(`Photomap running at http://${publicHost}`);
 
-resumeSync(scanSynced);
+if (!PEOPLE_PREVIEW) resumeSync(scanSynced);
 
 // Catch up on thumbnails a previous run (or a CLI scan) didn't generate.
-if (!process.env.PHOTOMAP_NO_PREGEN) void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));
+if (!PEOPLE_PREVIEW && !process.env.PHOTOMAP_NO_PREGEN) {
+  void pregenerateThumbs(undefined, Math.max(1, Math.floor(CPUS / 2)));
+}

@@ -179,7 +179,7 @@ export function AlbumHeader({
   );
 }
 
-function AlbumDialog({
+export function AlbumDialog({
   title,
   onClose,
   busy,

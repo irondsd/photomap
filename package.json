@@ -7,6 +7,7 @@
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
     "scan": "bun src/scan/cli.ts",
+    "people:detect": "bun src/people/cli.ts",
     "backfill": "bun src/scan/backfill-cli.ts",
     "estimates": "bun src/scan/estimates-cli.ts",
     "geotag": "bun src/scan/geotag-cli.ts",
