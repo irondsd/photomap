@@ -546,24 +546,22 @@ export function Viewer({
                   >
                     <Icon name="addAlbum" /> Add to album…
                   </button>
-                  {(isPrivate || visibility === "all") && (
-                    <button
-                      onClick={async () => {
-                        menuButton.current?.focus();
-                        setMenu(false);
-                        setWorking(true);
-                        try {
-                          await onChangePrivacy([id], !isPrivate);
-                        } catch (err) {
-                          setNotice((err as Error).message);
-                        } finally {
-                          setWorking(false);
-                        }
-                      }}
-                    >
-                      <Icon name="lock" /> {isPrivate ? "Remove from Private" : "Make private"}
-                    </button>
-                  )}
+                  <button
+                    onClick={async () => {
+                      menuButton.current?.focus();
+                      setMenu(false);
+                      setWorking(true);
+                      try {
+                        await onChangePrivacy([id], !isPrivate);
+                      } catch (err) {
+                        setNotice((err as Error).message);
+                      } finally {
+                        setWorking(false);
+                      }
+                    }}
+                  >
+                    <Icon name="lock" /> {isPrivate ? "Remove from Private" : "Make private"}
+                  </button>
                   {d?.edits && (
                     <>
                       <button onClick={revertEdits}>
