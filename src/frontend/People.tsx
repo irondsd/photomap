@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { PeopleCatalog, PersonSummary } from "../people/store";
 import { withPhotoVisibility, type PhotoVisibility } from "../photo-visibility";
 import { AlbumDialog, albumDates, albumRequest, CoverPicker, type CoverPickerState } from "./AlbumViews";
@@ -9,6 +9,7 @@ import { nf, type Points } from "./data";
 const PAGE_SIZE = 80;
 export const personName = (person: PersonSummary) => person.name ?? `Unnamed person ${person.id}`;
 const photoCount = (count: number) => `${nf.format(count)} ${count === 1 ? "photo" : "photos"}`;
+const peopleCount = (count: number) => `${nf.format(count)} ${count === 1 ? "person" : "people"}`;
 const matches = (person: PersonSummary, term: string) =>
   personName(person).toLowerCase().includes(term.trim().toLowerCase());
 
@@ -32,6 +33,7 @@ function Portrait({ person, visibility }: { person: PersonSummary; visibility: P
 
 export function PeopleView({
   personId,
+  hiddenOpen,
   person,
   membership,
   hasLocations,
@@ -41,12 +43,14 @@ export function PeopleView({
   revision,
   reload,
   onOpen,
+  onOpenHidden,
   onBack,
   onMap,
   onMerged,
   renderGallery,
 }: {
   personId: number | null;
+  hiddenOpen: boolean;
   person: PersonSummary | undefined;
   membership: Uint8Array | null;
   hasLocations: boolean | null;
@@ -56,6 +60,7 @@ export function PeopleView({
   revision: number;
   reload(): void;
   onOpen(id: number): void;
+  onOpenHidden(): void;
   onBack(): void;
   onMap(): void;
   onMerged(id: number): void;
@@ -67,8 +72,21 @@ export function PeopleView({
 }) {
   const [catalog, setCatalog] = useState<PeopleCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
-  const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState({
+    people: { query: "", limit: PAGE_SIZE },
+    hidden: { query: "", limit: PAGE_SIZE },
+  });
+  const collection = hiddenOpen ? "hidden" : "people";
+  const { query, limit } = search[collection];
+  const [hideAction, setHideAction] = useState<{ id: number; busy: boolean; error: string } | null>(null);
+  const hiding = hideAction?.id === personId ? hideAction : null;
+  const activePerson = useRef(personId);
+  useLayoutEffect(() => {
+    activePerson.current = personId;
+    return () => {
+      activePerson.current = null;
+    };
+  }, [personId]);
   const [edit, setEdit] = useState<"name" | "merge" | null>(null);
   const [cover, setCover] = useState<Omit<CoverPickerState, "onSave" | "onCancel"> | null>(null);
 
@@ -110,7 +128,25 @@ export function PeopleView({
     }
   };
 
-  const matching = useMemo(() => catalog?.people.filter((entry) => matches(entry, query)) ?? [], [catalog, query]);
+  const toggleHidden = async () => {
+    if (!person || hiding?.busy) return;
+    const { id, hidden } = person;
+    setHideAction({ id, busy: true, error: "" });
+    try {
+      await albumRequest(withPhotoVisibility(`people/${id}/hidden`, visibility), "PUT", { hidden: !hidden });
+      // Let the catalog reload before showing either list again.
+      setCatalog(null);
+      reload();
+      if (activePerson.current === id) onBack();
+      setHideAction((action) => (action?.id === id ? null : action));
+    } catch (error) {
+      setHideAction((action) => (action?.id === id ? { id, busy: false, error: (error as Error).message } : action));
+    }
+  };
+
+  const groups = hiddenOpen ? catalog?.hiddenPeople : catalog?.people;
+  const matching = useMemo(() => groups?.filter((entry) => matches(entry, query)) ?? [], [groups, query]);
+  const mergeTargets = person?.hidden ? catalog?.hiddenPeople : catalog?.people;
   const issue = personId == null ? catalogError : personError;
   const status = issue ? (
     <div className="empty">
@@ -129,19 +165,26 @@ export function PeopleView({
     return (
       <div className="album-index">
         <header className="album-heading">
-          <div>
-            <h1>People</h1>
-            {catalog && (
-              <p className="dim">
-                {nf.format(catalog.people.length)} {catalog.people.length === 1 ? "person" : "people found"}
-                {" · "}
-                {nf.format(catalog.scanned)} of {nf.format(catalog.total)} photos scanned
-                {!!catalog.failed && ` · ${nf.format(catalog.failed)} couldn’t be processed`}
-              </p>
-            )}
+          <div className="album-title">
+            {hiddenOpen && <IconButton name="back" label="All people" onClick={onBack} />}
+            <div>
+              <h1>{hiddenOpen ? "Hidden people" : "People"}</h1>
+              {catalog && (
+                <p className="dim">
+                  {peopleCount(groups?.length ?? 0)}
+                  {!hiddenOpen && (
+                    <>
+                      {" found · "}
+                      {nf.format(catalog.scanned)} of {nf.format(catalog.total)} photos scanned
+                      {!!catalog.failed && ` · ${nf.format(catalog.failed)} couldn’t be processed`}
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
           <div className="people-tools">
-            {!!catalog?.people.length && (
+            {!!groups?.length && (
               <input
                 className="input"
                 type="search"
@@ -149,8 +192,8 @@ export function PeopleView({
                 placeholder="Find a person"
                 value={query}
                 onChange={(event) => {
-                  setQuery(event.target.value);
-                  setLimit(PAGE_SIZE);
+                  const query = event.target.value;
+                  setSearch((current) => ({ ...current, [collection]: { query, limit: PAGE_SIZE } }));
                 }}
               />
             )}
@@ -161,8 +204,13 @@ export function PeopleView({
         </header>
         {issue || !catalog ? (
           status
-        ) : matching.length ? (
+        ) : (
           <>
+            {!matching.length && (
+              <div className="empty">
+                {query ? "No people match your search." : hiddenOpen ? "No hidden people yet." : "No face groups yet."}
+              </div>
+            )}
             <div className="album-cards people-cards">
               {matching.slice(0, limit).map((entry) => (
                 <button className="album-card" key={entry.id} onClick={() => onOpen(entry.id)}>
@@ -173,17 +221,32 @@ export function PeopleView({
                   </span>
                 </button>
               ))}
+              {!hiddenOpen && (
+                <button className="album-card" onClick={onOpenHidden}>
+                  <span className="album-cover person-portrait">
+                    <Icon name="eyeOff" />
+                  </span>
+                  <strong>Hidden people</strong>
+                  <span className="album-card-meta dim">{peopleCount(catalog.hiddenPeople.length)}</span>
+                </button>
+              )}
             </div>
             {matching.length > limit && (
               <div className="people-more">
-                <button className="btn" onClick={() => setLimit((value) => value + PAGE_SIZE)}>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    setSearch((current) => ({
+                      ...current,
+                      [collection]: { ...current[collection], limit: current[collection].limit + PAGE_SIZE },
+                    }))
+                  }
+                >
                   Show more
                 </button>
               </div>
             )}
           </>
-        ) : (
-          <div className="empty">{query ? "No people match your search." : "No face groups yet."}</div>
         )}
       </div>
     );
@@ -193,13 +256,18 @@ export function PeopleView({
     <div className="album-detail" key={personId}>
       <header className="album-heading album-detail-heading">
         <div className="album-title">
-          <IconButton name="back" label="All people" onClick={onBack} />
+          <IconButton name="back" label={person?.hidden ? "Hidden people" : "All people"} onClick={onBack} />
           {person && <Portrait key={person.coverId} person={person} visibility={visibility} />}
           <div>
             <h1>{person ? personName(person) : "Person"}</h1>
             {person && (
               <p className="dim">
                 {photoCount(person.count)} · {albumDates(person)}
+              </p>
+            )}
+            {hiding?.error && (
+              <p className="error" role="alert">
+                {hiding.error}
               </p>
             )}
           </div>
@@ -217,8 +285,11 @@ export function PeopleView({
               <button className="btn" onClick={() => setEdit("name")}>
                 {person.name ? "Rename" : "Add name"}
               </button>
-              <button className="btn" onClick={() => setEdit("merge")} disabled={(catalog?.people.length ?? 0) < 2}>
+              <button className="btn" onClick={() => setEdit("merge")} disabled={(mergeTargets?.length ?? 0) < 2}>
                 Merge with…
+              </button>
+              <button className="btn" disabled={hiding?.busy} onClick={toggleHidden}>
+                {person.hidden ? "Unhide person" : "Hide person"}
               </button>
               <button className="btn album-action" disabled={!hasLocations} onClick={onMap}>
                 <Icon name="map" /> Show on map
@@ -252,7 +323,7 @@ export function PeopleView({
           key={`${person.id}:${edit}`}
           action={edit}
           person={person}
-          people={catalog?.people ?? []}
+          people={mergeTargets ?? []}
           visibility={visibility}
           onClose={() => setEdit(null)}
           onSave={(target) => {

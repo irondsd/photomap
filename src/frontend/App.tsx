@@ -19,6 +19,7 @@ import { HidePrivateContext, PhotoVisibilityContext } from "./photoVisibility";
 
 type Mode = "map" | "gallery" | "albums" | "people";
 const PRIVATE_ALBUM = -1;
+const HIDDEN_PEOPLE = -1;
 interface Destination {
   mode: Mode;
   album: number | null;
@@ -47,7 +48,8 @@ function readHash(allowPrivate = false): HashState {
   const rawAlbum = q.get("album");
   const parsedAlbum = rawAlbum ? Number(rawAlbum) : NaN;
   const album = Number.isSafeInteger(parsedAlbum) && parsedAlbum >= 0 ? parsedAlbum : null;
-  const person = Number(q.get("person"));
+  const rawPerson = q.get("person");
+  const person = Number(rawPerson);
   return {
     mode: v === "gallery" || v === "map" || v === "albums" || v === "people" ? v : null,
     album:
@@ -57,7 +59,11 @@ function readHash(allowPrivate = false): HashState {
           ? null
           : album,
     person:
-      (v === "people" || (v === "map" && album == null)) && Number.isSafeInteger(person) && person > 0 ? person : null,
+      v === "people" && rawPerson === "hidden"
+        ? HIDDEN_PEOPLE
+        : (v === "people" || (v === "map" && album == null)) && Number.isSafeInteger(person) && person > 0
+          ? person
+          : null,
     map: m && m.length === 3 && m.every(Number.isFinite) ? { center: [m[1]!, m[0]!], zoom: m[2]! } : null,
     t: t && t.length === 2 && t.every(Number.isFinite) && t[0]! < t[1]! ? [t[0]!, t[1]!] : null,
   };
@@ -67,7 +73,7 @@ function viewHash({ mode, album, person }: Destination, map: MlMap | null, t: Ra
   const q = new URLSearchParams();
   q.set("view", mode);
   if (album != null) q.set("album", album === PRIVATE_ALBUM ? "private" : String(album));
-  if (person != null) q.set("person", String(person));
+  if (person != null) q.set("person", person === HIDDEN_PEOPLE ? "hidden" : String(person));
   if (map) {
     const c = map.getCenter();
     q.set("map", `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom().toFixed(2)}`);
@@ -233,7 +239,9 @@ export function App() {
     album: initialHash.album,
     person: initialHash.person,
   }));
-  const { mode, album: albumId, person: personId = null } = destination;
+  const { mode, album: albumId, person: personRoute = null } = destination;
+  const hiddenPeopleOpen = mode === "people" && personRoute === HIDDEN_PEOPLE;
+  const personId = hiddenPeopleOpen ? null : personRoute;
   const privateOpen = mode === "albums" && albumId === PRIVATE_ALBUM;
   const privateEntry = useRef(false);
   const [showPrivate, setShowPrivate] = useState(false);
@@ -332,12 +340,20 @@ export function App() {
       const next = { mode: m, album, person };
       const hash = viewHash(next, mapRef.current, range);
       if (replace) history.replaceState(history.state, "", hash);
-      else if (m !== mode || album !== albumId || person !== personId) {
+      else if (m !== mode || album !== albumId || person !== personRoute) {
         history.replaceState(history.state, "", viewHash(destination, mapRef.current, selection));
         const fromAlbumIndex = m === "albums" && album != null && mode === "albums" && albumId == null;
-        const fromPeopleIndex = person != null && mode === "people" && personId == null;
+        const enteringPeopleGroup = m === "people" && person != null && mode === "people";
+        const fromPeopleIndex = enteringPeopleGroup && personRoute == null;
+        const fromHiddenPeople = enteringPeopleGroup && hiddenPeopleOpen;
         history.pushState(
-          fromAlbumIndex ? { fromAlbumIndex: true } : fromPeopleIndex ? { fromPeopleIndex: true } : null,
+          fromAlbumIndex
+            ? { fromAlbumIndex: true }
+            : fromPeopleIndex
+              ? { fromPeopleIndex: true }
+              : fromHiddenPeople
+                ? { fromHiddenPeople: true }
+                : null,
           "",
           hash,
         );
@@ -345,15 +361,15 @@ export function App() {
       activate(next);
       setSelection(range);
     },
-    [activate, albumId, destination, mode, personId, selection],
+    [activate, albumId, destination, hiddenPeopleOpen, mode, personRoute, selection],
   );
   const backToAlbums = () => {
     if (history.state?.fromAlbumIndex) history.back();
     else navigate("albums", null, selection, true);
   };
   const backToPeople = () => {
-    if (history.state?.fromPeopleIndex) history.back();
-    else navigate("people", null, selection, true);
+    if (history.state?.fromPeopleIndex || history.state?.fromHiddenPeople) history.back();
+    else navigate("people", null, selection, true, personDetail?.person.hidden ? HIDDEN_PEOPLE : null);
   };
 
   const hidePrivate = useCallback(() => {
@@ -877,7 +893,7 @@ export function App() {
           <button
             aria-pressed={mode === "people"}
             onClick={() => {
-              if (mode === "people" && personId != null) backToPeople();
+              if (mode === "people" && personRoute != null) backToPeople();
               else navigate("people");
             }}
           >
@@ -1059,6 +1075,7 @@ export function App() {
           <PeopleView
             key={dataKey}
             personId={personId}
+            hiddenOpen={hiddenPeopleOpen}
             visibility={visibility}
             points={points}
             person={personDetail?.person}
@@ -1068,6 +1085,7 @@ export function App() {
             revision={peopleRevision}
             reload={peopleChanged}
             onOpen={(id) => navigate("people", null, selection, false, id)}
+            onOpenHidden={() => navigate("people", null, selection, false, HIDDEN_PEOPLE)}
             onMap={showGroupMap}
             onBack={backToPeople}
             onMerged={(id) =>

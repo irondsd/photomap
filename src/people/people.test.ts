@@ -9,6 +9,7 @@ import {
   personDetail,
   personPhotos,
   setPersonCover,
+  setPersonHidden,
   visibleFace,
 } from "./store";
 
@@ -80,6 +81,7 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
     const summary = {
       id: b,
       name: "Named group",
+      hidden: false,
       count: 1,
       coverId: publicFace,
       coverPhotoId: publicPhoto,
@@ -96,9 +98,18 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
       { ...summary, count: 2, coverId: privateFace, coverPhotoId: privatePhoto, last },
     ]);
     expect(listPeople("public").people).toEqual([summary]);
+    expect(setPersonHidden(b, true, "public")).toBe(true);
+    expect(setPersonHidden(b, true, "public")).toBe(true);
+    expect(listPeople("public").people).toEqual([]);
+    expect(listPeople("public").hiddenPeople).toEqual([{ ...summary, hidden: true }]);
+    expect(personDetail(b, "public")).toEqual({ person: { ...summary, hidden: true }, ids: [publicPhoto] });
+    expect(setPersonHidden(b, false, "public")).toBe(true);
+    expect(listPeople("public").people).toEqual([summary]);
+    expect(listPeople("public").hiddenPeople).toEqual([]);
     expect(visibleFace(privateFace, "public")).toBeNull();
     db.run("UPDATE photos SET mtime = 2 WHERE id = ?", [publicPhoto]);
     expect(personPhotos(b, "public")).toBeNull();
+    expect(setPersonHidden(b, true, "public")).toBe(false);
     expect(visibleFace(publicFace, "all")).toBeNull();
   } finally {
     db.run("ROLLBACK TO people_test");

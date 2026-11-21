@@ -102,6 +102,8 @@ Sync runs on its own port (`PHOTOMAP_SYNC_PORT`), listening on the local network
 
 The **People** tab groups photos by detected faces. Groups start unnamed. Open a group to see its date range, pick a cover, or show its geotagged photos on the map. Use **Merge with…** to combine it with another group. The selected group keeps its name and chosen cover when it has them. A photo can appear in more than one group, and two faces in the same photo count as one photo after a merge.
 
+Use **Hide person** on a group to move it out of the main People grid. Open the **Hidden people** card at the end of the grid and choose **Unhide person** to restore a group. Its photos stay in the library, and face matching continues to update the group.
+
 Run the experiment against a SQLite backup. Use a fresh trial directory for each snapshot so any earlier People results stay intact. SQLite's backup command includes committed changes from the live WAL.
 
 ```sh

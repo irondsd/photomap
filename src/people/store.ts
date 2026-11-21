@@ -6,6 +6,7 @@ import type { FaceBox } from "./images";
 export interface PersonSummary {
   id: number;
   name: string | null;
+  hidden: boolean;
   count: number;
   coverId: number;
   coverPhotoId: number;
@@ -20,6 +21,7 @@ export interface PersonDetail {
 
 export interface PeopleCatalog {
   people: PersonSummary[];
+  hiddenPeople: PersonSummary[];
   scanned: number;
   failed: number;
   total: number;
@@ -34,6 +36,9 @@ export function initPeople() {
     CREATE TABLE IF NOT EXISTS person_covers (
       person_id INTEGER PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
       photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS hidden_people (
+      person_id INTEGER PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS face_scans (
       photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
@@ -71,6 +76,7 @@ function summaries(visibility: PhotoVisibility, id?: number): PersonSummary[] {
       {
         id: number;
         name: string | null;
+        hidden: number;
         faceId: number;
         photoId: number;
         quality: number;
@@ -80,10 +86,11 @@ function summaries(visibility: PhotoVisibility, id?: number): PersonSummary[] {
       },
       number[]
     >(
-      `SELECT f.person_id id, g.name, f.id faceId, f.photo_id photoId, f.quality,
+      `SELECT f.person_id id, g.name, h.person_id IS NOT NULL AS hidden, f.id faceId, f.photo_id photoId, f.quality,
     c.photo_id chosenPhoto, ${collectionTaken} AS time, p.time_source AS source
     FROM faces f JOIN face_scans s ON s.photo_id = f.photo_id JOIN photos p ON ${currentScan}
     JOIN people g ON g.id = f.person_id LEFT JOIN person_covers c ON c.person_id = g.id
+    LEFT JOIN hidden_people h ON h.person_id = g.id
     WHERE p.missing = 0${scope}${id == null ? "" : " AND f.person_id = ?"}
     ORDER BY f.person_id, time, f.photo_id`,
     )
@@ -98,6 +105,7 @@ function summaries(visibility: PhotoVisibility, id?: number): PersonSummary[] {
       group = {
         id: member.id,
         name: member.name,
+        hidden: Boolean(member.hidden),
         count: 0,
         coverId: member.faceId,
         coverPhotoId: member.photoId,
@@ -140,15 +148,21 @@ export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
       `SELECT count(*) n FROM photos p WHERE p.missing = 0 AND p.kind IN ('photo', 'raw')${scope}`,
     )
     .get()!.n;
-  if (!hasPeople()) return { people: [], scanned: 0, failed: 0, total };
-  const people = summaries(visibility);
+  if (!hasPeople()) return { people: [], hiddenPeople: [], scanned: 0, failed: 0, total };
+  const groups = summaries(visibility);
   const { scanned, failed } = db
     .query<{ scanned: number; failed: number }, []>(
       `SELECT count(*) - coalesce(sum(s.failed), 0) scanned, coalesce(sum(s.failed), 0) failed
       FROM face_scans s JOIN photos p ON ${currentScan} WHERE p.missing = 0${scope}`,
     )
     .get()!;
-  return { people, total, scanned, failed };
+  return {
+    people: groups.filter((group) => !group.hidden),
+    hiddenPeople: groups.filter((group) => group.hidden),
+    total,
+    scanned,
+    failed,
+  };
 }
 
 export function personPhotos(id: number, visibility: PhotoVisibility): number[] | null {
@@ -193,6 +207,13 @@ export const namePerson = db.transaction(
   (id: number, name: string | null, visibility: PhotoVisibility) =>
     personPhotos(id, visibility) != null && db.run("UPDATE people SET name = ? WHERE id = ?", [name, id]).changes > 0,
 );
+
+export const setPersonHidden = db.transaction((id: number, hidden: boolean, visibility: PhotoVisibility) => {
+  if (!personPhotos(id, visibility)) return false;
+  if (hidden) db.run("INSERT OR IGNORE INTO hidden_people (person_id) VALUES (?)", [id]);
+  else db.run("DELETE FROM hidden_people WHERE person_id = ?", [id]);
+  return true;
+});
 
 export const mergePeople = db.transaction((source: number, target: number, visibility: PhotoVisibility) => {
   if (source === target || !personPhotos(source, visibility) || !personPhotos(target, visibility)) return false;

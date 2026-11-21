@@ -10,6 +10,7 @@ import {
   personDetail,
   personPhotos,
   setPersonCover,
+  setPersonHidden,
   visibleFace,
 } from "./people/store";
 import { watchForNewPhotos } from "./people/auto";
@@ -399,6 +400,17 @@ const server = Bun.serve({
         return setPersonCover.immediate(id, photoId, photoVisibility(req))
           ? json({ ok: true })
           : bad("This photo is no longer available in the group.", 409);
+      }),
+    },
+
+    "/api/people/:id/hidden": {
+      PUT: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { hidden?: unknown } | null;
+        if (!id || typeof body?.hidden !== "boolean") return bad("Choose whether to hide this person.");
+        return setPersonHidden.immediate(id, body.hidden, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("Person not found", 404);
       }),
     },
 
