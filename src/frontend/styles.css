@@ -2333,6 +2333,54 @@ h4 {
 .people-cards {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 144px), 1fr));
 }
+.people-bulk-bar {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px clamp(16px, 3vw, 40px);
+  margin-bottom: 12px;
+  border-block: 1px solid var(--border);
+  background: var(--panel);
+}
+.people-bulk-bar > span:first-child {
+  font-weight: 600;
+  margin-right: 4px;
+}
+.people-selectable {
+  position: relative;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.people-selection-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  pointer-events: none;
+}
+.people-selection-check .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+.people-selectable[aria-pressed="true"] .people-selection-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.people-selectable[aria-pressed="true"] .person-portrait {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .person-portrait {
   aspect-ratio: 1;
 }

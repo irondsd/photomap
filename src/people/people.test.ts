@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { addRoot, db, setPhotosPrivate } from "../db";
 import { EMBEDDING_SIZE, FaceGroups } from "./group";
 import {
+  bulkEditPeople,
   initPeople,
   listPeople,
   mergePeople,
@@ -107,6 +108,24 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
     expect(listPeople("public").people).toEqual([summary]);
     expect(listPeople("public").hiddenPeople).toEqual([]);
     expect(visibleFace(privateFace, "public")).toBeNull();
+
+    const c = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
+    const d = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
+    face(publicPhoto, c, 0.5);
+    face(privatePhoto, d, 0.5);
+    expect(bulkEditPeople.immediate([c, d], b, "public")).toBe(false);
+    expect(bulkEditPeople.immediate([c, b], null, "public")).toBe(false);
+    expect(personPhotos(c, "public")).toEqual([publicPhoto]);
+    expect(listPeople("all").hiddenPeople).toEqual([]);
+    expect(bulkEditPeople.immediate([c, d], null, "all")).toBe(true);
+    expect(listPeople("all").hiddenPeople.map((person) => person.id)).toEqual([c, d]);
+    expect(setPersonHidden(c, false, "public")).toBe(true);
+    expect(setPersonHidden(d, false, "all")).toBe(true);
+    expect(bulkEditPeople.immediate([c, d], b, "all")).toBe(true);
+    expect(listPeople("all").people).toEqual([
+      { ...summary, count: 2, coverId: privateFace, coverPhotoId: privatePhoto, last },
+    ]);
+
     db.run("UPDATE photos SET mtime = 2 WHERE id = ?", [publicPhoto]);
     expect(personPhotos(b, "public")).toBeNull();
     expect(setPersonHidden(b, true, "public")).toBe(false);

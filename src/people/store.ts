@@ -22,6 +22,7 @@ export interface PersonDetail {
 export interface PeopleCatalog {
   people: PersonSummary[];
   hiddenPeople: PersonSummary[];
+  bulkEditing?: boolean;
   scanned: number;
   failed: number;
   total: number;
@@ -215,8 +216,7 @@ export const setPersonHidden = db.transaction((id: number, hidden: boolean, visi
   return true;
 });
 
-export const mergePeople = db.transaction((source: number, target: number, visibility: PhotoVisibility) => {
-  if (source === target || !personPhotos(source, visibility) || !personPhotos(target, visibility)) return false;
+function mergePersonInto(source: number, target: number) {
   db.run("UPDATE people SET name = coalesce(name, (SELECT name FROM people WHERE id = ?)) WHERE id = ?", [
     source,
     target,
@@ -227,5 +227,28 @@ export const mergePeople = db.transaction((source: number, target: number, visib
     source,
   ]);
   db.run("DELETE FROM people WHERE id = ?", [source]);
+}
+
+export const mergePeople = db.transaction((source: number, target: number, visibility: PhotoVisibility) => {
+  if (source === target || !personPhotos(source, visibility) || !personPhotos(target, visibility)) return false;
+  mergePersonInto(source, target);
+  return true;
+});
+
+export const bulkEditPeople = db.transaction((ids: number[], target: number | null, visibility: PhotoVisibility) => {
+  if (!hasPeople()) return false;
+  const visibleGroup = db.query<{ name: string | null }, [number]>(`SELECT g.name FROM people g
+    WHERE g.id = ? AND NOT EXISTS (SELECT 1 FROM hidden_people h WHERE h.person_id = g.id)
+    AND EXISTS (SELECT 1 ${facePhotos} AND f.person_id = g.id${photoVisibilityFilter(visibility, "p")})`);
+  const sources = [...new Set(ids)].filter((id) => id !== target);
+  if (!sources.length || (target != null && !visibleGroup.get(target))) return false;
+  if (sources.some((id) => visibleGroup.get(id)?.name !== null)) return false;
+
+  // Validate every group before changing any. The immediate transaction also serializes with imports and single edits.
+  const hide = db.query("INSERT INTO hidden_people (person_id) VALUES (?)");
+  for (const id of sources) {
+    if (target == null) hide.run(id);
+    else mergePersonInto(id, target);
+  }
   return true;
 });

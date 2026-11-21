@@ -23,6 +23,7 @@ function Portrait({ person, visibility }: { person: PersonSummary; visibility: P
         src={url}
         alt=""
         loading="lazy"
+        draggable={false}
         onError={(event) => {
           event.currentTarget.hidden = true;
         }}
@@ -89,6 +90,55 @@ export function PeopleView({
   }, [personId]);
   const [edit, setEdit] = useState<"name" | "merge" | null>(null);
   const [cover, setCover] = useState<Omit<CoverPickerState, "onSave" | "onCancel"> | null>(null);
+  const [selectedPeople, setSelectedPeople] = useState<Set<number> | null>(null);
+  const [bulkMerge, setBulkMerge] = useState(false);
+  const [bulkHiding, setBulkHiding] = useState(false);
+  const [bulkFeedback, setBulkFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const heldCard = useRef<number | null>(null);
+  const cancelHold = () => {
+    if (hold.current) clearTimeout(hold.current.timer);
+    hold.current = null;
+  };
+  const bulkEnabled = catalog?.bulkEditing === true && personId == null && !hiddenOpen;
+  const selecting = bulkEnabled && selectedPeople != null;
+  const selectedCount = selecting ? selectedPeople!.size : 0;
+
+  useEffect(() => cancelHold, [personId, hiddenOpen]);
+  useEffect(() => {
+    if (!selecting || bulkMerge || bulkHiding) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !(event.target as HTMLElement)?.closest("input, dialog")) {
+        setSelectedPeople(null);
+        setBulkFeedback(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting, bulkMerge, bulkHiding]);
+
+  const bulkDone = (text: string) => {
+    setBulkFeedback({ text });
+    setSelectedPeople(new Set());
+    reload();
+  };
+
+  const hideSelected = async () => {
+    if (!selectedCount || !selectedPeople || bulkHiding) return;
+    setBulkFeedback(null);
+    setBulkHiding(true);
+    try {
+      await albumRequest(withPhotoVisibility("people/bulk", visibility), "POST", {
+        ids: [...selectedPeople],
+        target: null,
+      });
+      bulkDone(`Hidden ${peopleCount(selectedCount)}.`);
+    } catch (error) {
+      setBulkFeedback({ text: (error as Error).message, error: true });
+    } finally {
+      setBulkHiding(false);
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -200,8 +250,45 @@ export function PeopleView({
             <button className="btn" onClick={reload}>
               Refresh
             </button>
+            {bulkEnabled && !selecting && !!catalog?.people.some((entry) => !entry.name) && (
+              <button className="btn" onClick={() => setSelectedPeople(new Set())}>
+                Select
+              </button>
+            )}
           </div>
         </header>
+        {selecting && (
+          <div className="people-bulk-bar" role="group" aria-label="People selection">
+            <span role="status">
+              {selectedCount ? `${peopleCount(selectedCount)} selected` : "Select unnamed groups"}
+            </span>
+            <button
+              className="btn btn-primary"
+              disabled={!selectedCount || bulkHiding}
+              onClick={() => setBulkMerge(true)}
+            >
+              Merge…
+            </button>
+            <button className="btn" disabled={!selectedCount || bulkHiding} onClick={hideSelected}>
+              {bulkHiding ? "Hiding…" : "Hide selected"}
+            </button>
+            <button
+              className="btn"
+              disabled={bulkHiding}
+              onClick={() => {
+                setSelectedPeople(null);
+                setBulkFeedback(null);
+              }}
+            >
+              Done
+            </button>
+            {bulkFeedback && (
+              <span className={bulkFeedback.error ? "error" : "dim"} role={bulkFeedback.error ? "alert" : "status"}>
+                {bulkFeedback.text}
+              </span>
+            )}
+          </div>
+        )}
         {issue || !catalog ? (
           status
         ) : (
@@ -212,16 +299,79 @@ export function PeopleView({
               </div>
             )}
             <div className="album-cards people-cards">
-              {matching.slice(0, limit).map((entry) => (
-                <button className="album-card" key={entry.id} onClick={() => onOpen(entry.id)}>
-                  <Portrait person={entry} visibility={visibility} />
-                  <strong>{personName(entry)}</strong>
-                  <span className="album-card-meta dim">
-                    {photoCount(entry.count)} · {albumDates(entry)}
-                  </span>
-                </button>
-              ))}
-              {!hiddenOpen && (
+              {matching.slice(0, limit).map((entry) => {
+                const canSelect = bulkEnabled && entry.name == null;
+                const selected = selectedPeople?.has(entry.id) ?? false;
+                return (
+                  <button
+                    className={canSelect ? "album-card people-selectable" : "album-card"}
+                    key={entry.id}
+                    disabled={selecting && (!canSelect || bulkHiding)}
+                    aria-pressed={selecting && canSelect ? selected : undefined}
+                    onPointerDown={
+                      canSelect
+                        ? (event) => {
+                            heldCard.current = null;
+                            if (selecting || event.button !== 0 || !event.isPrimary) return;
+                            cancelHold();
+                            hold.current = {
+                              x: event.clientX,
+                              y: event.clientY,
+                              timer: setTimeout(() => {
+                                heldCard.current = entry.id;
+                                setSelectedPeople(new Set([entry.id]));
+                                hold.current = null;
+                              }, 500),
+                            };
+                          }
+                        : undefined
+                    }
+                    onPointerMove={
+                      canSelect
+                        ? (event) => {
+                            const start = hold.current;
+                            if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10)
+                              cancelHold();
+                          }
+                        : undefined
+                    }
+                    onPointerUp={canSelect ? cancelHold : undefined}
+                    onPointerCancel={canSelect ? cancelHold : undefined}
+                    onPointerLeave={canSelect ? cancelHold : undefined}
+                    onContextMenu={canSelect ? (event) => event.preventDefault() : undefined}
+                    onClick={(event) => {
+                      if (event.detail && heldCard.current === entry.id) {
+                        heldCard.current = null;
+                        return;
+                      }
+                      if (!selecting) {
+                        onOpen(entry.id);
+                        return;
+                      }
+                      if (!canSelect) return;
+                      setBulkFeedback(null);
+                      setSelectedPeople((current) => {
+                        const updated = new Set(current);
+                        if (updated.has(entry.id)) updated.delete(entry.id);
+                        else updated.add(entry.id);
+                        return updated;
+                      });
+                    }}
+                  >
+                    <Portrait person={entry} visibility={visibility} />
+                    {selecting && canSelect && (
+                      <span className="people-selection-check" aria-hidden>
+                        {selected && <Icon name="check" />}
+                      </span>
+                    )}
+                    <strong>{personName(entry)}</strong>
+                    <span className="album-card-meta dim">
+                      {photoCount(entry.count)} · {albumDates(entry)}
+                    </span>
+                  </button>
+                );
+              })}
+              {!hiddenOpen && !selecting && (
                 <button className="album-card" onClick={onOpenHidden}>
                   <span className="album-cover person-portrait">
                     <Icon name="eyeOff" />
@@ -247,6 +397,25 @@ export function PeopleView({
               </div>
             )}
           </>
+        )}
+        {bulkMerge && selectedPeople && catalog && (
+          <PersonDialog
+            action="bulk-merge"
+            ids={[...selectedPeople]}
+            people={[...catalog.people].sort(
+              (a, b) =>
+                Number(b.name != null) - Number(a.name != null) ||
+                Number(selectedPeople.has(b.id)) - Number(selectedPeople.has(a.id)),
+            )}
+            visibility={visibility}
+            onClose={() => setBulkMerge(false)}
+            onSave={(target) => {
+              const kept = catalog.people.find((entry) => entry.id === target);
+              const moved = selectedPeople.size - Number(target != null && selectedPeople.has(target));
+              setBulkMerge(false);
+              bulkDone(`Merged ${peopleCount(moved)} into ${kept ? personName(kept) : "the chosen group"}.`);
+            }}
+          />
         )}
       </div>
     );
@@ -337,30 +506,30 @@ export function PeopleView({
   );
 }
 
-function PersonDialog({
-  action,
-  person,
-  people,
-  visibility,
-  onClose,
-  onSave,
-}: {
-  action: "name" | "merge";
-  person: PersonSummary;
-  people: PersonSummary[];
-  visibility: PhotoVisibility;
-  onClose(): void;
-  onSave(target: number | null): void;
-}) {
-  const [name, setName] = useState(person.name ?? "");
+function PersonDialog(
+  props: {
+    people: PersonSummary[];
+    visibility: PhotoVisibility;
+    onClose(): void;
+    onSave(target: number | null): void;
+  } & ({ action: "name" | "merge"; person: PersonSummary } | { action: "bulk-merge"; ids: number[] }),
+) {
+  const { action, people, visibility, onClose, onSave } = props;
+  const person = action === "bulk-merge" ? null : props.person;
+  const ids = action === "bulk-merge" ? props.ids : null;
+  const [name, setName] = useState(person?.name ?? "");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<PersonSummary | null>(null);
   const [limit, setLimit] = useState(24);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const merging = action === "merge";
-  const candidates = merging ? people.filter((entry) => entry.id !== person.id && matches(entry, query)) : [];
-  const title = merging ? "Merge people" : person.name ? "Rename person" : "Add a name";
+  const merging = action !== "name";
+  const candidates = merging
+    ? people.filter(
+        (entry) => entry.id !== person?.id && !(ids?.length === 1 && ids[0] === entry.id) && matches(entry, query),
+      )
+    : [];
+  const title = merging ? "Merge people" : person?.name ? "Rename person" : "Add a name";
   return (
     <AlbumDialog title={title} onClose={onClose} busy={busy}>
       <form
@@ -371,8 +540,11 @@ function PersonDialog({
           setBusy(true);
           setError("");
           try {
-            const path = withPhotoVisibility(`people/${person.id}${merging ? "/merge" : ""}`, visibility);
-            await albumRequest(path, merging ? "POST" : "PATCH", merging ? { target: selected!.id } : { name });
+            const path = withPhotoVisibility(
+              ids ? "people/bulk" : `people/${person!.id}${merging ? "/merge" : ""}`,
+              visibility,
+            );
+            await albumRequest(path, merging ? "POST" : "PATCH", merging ? { target: selected!.id, ids } : { name });
             onSave(merging ? selected!.id : null);
           } catch (problem) {
             setError((problem as Error).message);
@@ -419,11 +591,19 @@ function PersonDialog({
                 </button>
               )}
             </div>
-            {selected && (
+            {ids && selected ? (
               <p role="status">
-                Combine {personName(person)} and {personName(selected)} under{" "}
-                <strong>{selected.name ?? person.name ?? personName(selected)}</strong>.
+                Merge {peopleCount(ids.length - Number(ids.includes(selected.id)))} into{" "}
+                <strong>{personName(selected)}</strong>.
               </p>
+            ) : (
+              selected &&
+              person && (
+                <p role="status">
+                  Combine {personName(person)} and {personName(selected)} under{" "}
+                  <strong>{selected.name ?? person.name ?? personName(selected)}</strong>.
+                </p>
+              )
             )}
           </>
         ) : (

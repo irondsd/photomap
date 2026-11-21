@@ -2,6 +2,7 @@ import { join } from "node:path";
 import index from "./frontend/index.html";
 import { HOST, PORT, CPUS, PEOPLE_PREVIEW } from "./config";
 import {
+  bulkEditPeople,
   hasPeople,
   initPeople,
   listPeople,
@@ -56,6 +57,7 @@ import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder"
 import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
 
 const peopleAuto = process.env.PHOTOMAP_PEOPLE_AUTO === "1";
+const peopleBulk = process.env.PHOTOMAP_PEOPLE_BULK === "1";
 if (PEOPLE_PREVIEW || peopleAuto) db.run("PRAGMA busy_timeout = 5000");
 if (hasPeople() || peopleAuto) initPeople();
 
@@ -346,7 +348,23 @@ const server = Bun.serve({
     },
 
     "/api/people": {
-      GET: guard((req) => json(listPeople(photoVisibility(req)), { headers: noStore })),
+      GET: guard((req) => json({ ...listPeople(photoVisibility(req)), bulkEditing: peopleBulk }, { headers: noStore })),
+    },
+
+    "/api/people/bulk": {
+      POST: guard(async (req) => {
+        if (!peopleBulk) return bad("Not found", 404);
+        const body = (await req.json().catch(() => null)) as { ids?: unknown; target?: unknown } | null;
+        const rawIds = body?.ids;
+        const ids = Array.isArray(rawIds) && rawIds.every(Number.isSafeInteger) ? parseIds(rawIds) : null;
+        const target = body?.target;
+        if (!ids || !(target === null || (typeof target === "number" && Number.isSafeInteger(target) && target > 0))) {
+          return bad("Choose unnamed groups and a valid merge target, or hide the selection.");
+        }
+        return bulkEditPeople.immediate(ids, target, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("The selection changed. Refresh People and try again.", 409);
+      }),
     },
 
     "/api/people/:id": {
