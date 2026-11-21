@@ -121,3 +121,17 @@ test("lookups for virtualisation", () => {
   if (k > 0) expect(l.y[k - 1]! + l.h[k - 1]!).toBeLessThan(600);
   expect(groupAt(l.groups, l.groups[2]!.y + 5)).toBe(2);
 });
+
+test("an album lays out only its members in one grid, by date with undated items last", () => {
+  const p = points([
+    [DAY, 1],
+    [2 * DAY, 1],
+    [3 * DAY, 1],
+    [NaN, 1],
+  ]);
+  const order = galleryOrder(p, 7, Uint8Array.of(1, 0, 1, 1), true);
+  const layout = buildLayout(p, order, 1000, 16, 100, false);
+  expect([...layout.order]).toEqual([0, 2, 3]);
+  expect(layout.groups).toHaveLength(0);
+  expect([...layout.y]).toEqual([0, 0, 0]);
+});

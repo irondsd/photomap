@@ -52,14 +52,22 @@ function groupKey(p: Points, i: number): string {
 }
 
 /** Display order: newest first, then photos without a usable date. */
-export function galleryOrder(p: Points, kinds: number): Int32Array {
+export function galleryOrder(
+  p: Points,
+  kinds: number,
+  membership: Uint8Array | null = null,
+  oldestFirst = false,
+): Int32Array {
   const out: number[] = [];
   const tail: number[] = [];
   for (let i = p.n - 1; i >= 0; i--) {
-    if (!((1 << p.kind[i]!) & kinds)) continue;
+    if ((membership && !membership[i]) || !((1 << p.kind[i]!) & kinds)) continue;
     (dateless(p, i) ? tail : out).push(i);
   }
-  return Int32Array.from([...out, ...tail.reverse()]);
+  if (oldestFirst) out.reverse();
+  if (membership) tail.sort((a, b) => p.id[a]! - p.id[b]!);
+  else tail.reverse();
+  return Int32Array.from([...out, ...tail]);
 }
 
 /**
@@ -72,6 +80,7 @@ export function buildLayout(
   width: number,
   left = 0,
   target = rowHeightFor(width),
+  groupByDay = true,
 ): Layout {
   const n = order.length;
   const x = new Float32Array(n);
@@ -86,31 +95,31 @@ export function buildLayout(
   while (k < n) {
     // One day, one year of year-only photos, or the dateless tail.
     const first = order[k]!;
-    const key = groupKey(p, first);
+    const key = groupByDay ? groupKey(p, first) : "none";
     const t0 = key === "none" ? NaN : p.t[first]!;
-    let end = k + 1;
+    let end = groupByDay ? k + 1 : n;
     while (end < n && groupKey(p, order[end]!) === key) end++;
 
-    // Most photographed countries that day.
-    const counts = new Map<number, number>();
-    for (let j = k; j < end; j++) {
-      const c = p.country[order[j]!]!;
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    const places = [...counts]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([c]) => p.countries[c - 1])
-      .join(" · ");
-
-    if (groups.length) top += GROUP_GAP;
     const gi = groups.length;
-    const label =
-      key === "none" ? "Date unknown" : key[0] === "y" ? `${key.slice(1)} · Date unknown` : formatDayHeader(t0);
-    groups.push({ y: top, start: k, end, t: t0, label, places });
-    top += HEADER_H;
+    if (groupByDay) {
+      const counts = new Map<number, number>();
+      for (let j = k; j < end; j++) {
+        const c = p.country[order[j]!]!;
+        if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+      const places = [...counts]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([c]) => p.countries[c - 1])
+        .join(" · ");
+      if (groups.length) top += GROUP_GAP;
+      const label =
+        key === "none" ? "Date unknown" : key[0] === "y" ? `${key.slice(1)} · Date unknown` : formatDayHeader(t0);
+      groups.push({ y: top, start: k, end, t: t0, label, places });
+      top += HEADER_H;
+    }
 
-    // Rows within the day.
+    // Rows within this group, or across the whole album.
     let rowStart = k;
     let sum = 0;
     const place = (from: number, to: number, rowH: number) => {
@@ -121,7 +130,7 @@ export function buildLayout(
         y[j] = top;
         w[j] = a * rowH;
         h[j] = rowH;
-        group[j] = gi;
+        group[j] = groupByDay ? gi : -1;
         cx += a * rowH + GAP;
       }
       top += rowH + GAP;

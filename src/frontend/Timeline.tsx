@@ -24,6 +24,7 @@ interface TimelineProps {
   onSelect(r: Range | null): void;
   /** When set, only points with mask[i] = 1 are counted (photos in the map viewport). */
   mapMask: Uint8Array | null;
+  membership: Uint8Array | null;
   followMap: boolean;
   onFollowMap(v: boolean): void;
   /** Time of the hovered photo, drawn as a marker. */
@@ -86,7 +87,14 @@ interface Bins {
   step: number;
 }
 
-function computeBins(p: Points, view: Range, width: number, kinds: number, mask: Uint8Array | null): Bins {
+function computeBins(
+  p: Points,
+  view: Range,
+  width: number,
+  kinds: number,
+  mask: Uint8Array | null,
+  membership: Uint8Array | null,
+): Bins {
   const span = view[1] - view[0];
   const [unit, step] = pickUnit(span, width, BIN_UNITS, MIN_BAR_PX);
   const edges: number[] = [];
@@ -102,7 +110,7 @@ function computeBins(p: Points, view: Range, width: number, kinds: number, mask:
     let g = 0;
     let ng = 0;
     for (; i < p.dated && p.t[i]! < end; i++) {
-      if (!((1 << p.kind[i]!) & kinds)) continue;
+      if ((membership && !membership[i]) || !((1 << p.kind[i]!) & kinds)) continue;
       if (mask) {
         if (mask[i]) g++;
       } else if (Number.isNaN(p.lat[i]!)) ng++;
@@ -147,13 +155,19 @@ function tickLabel(t: number, unit: Unit): { text: string; major: boolean } {
   }
 }
 
-function dataExtent(p: Points): Range {
-  if (p.dated === 0) {
+function dataExtent(p: Points, membership: Uint8Array | null): Range {
+  let lo = 0;
+  let hi = p.dated - 1;
+  if (membership) {
+    while (lo <= hi && !membership[lo]) lo++;
+    while (hi > lo && !membership[hi]) hi--;
+  }
+  if (lo > hi) {
     const now = Date.now() / 1000;
     return [now - 365 * 86400, now];
   }
-  const a = p.t[0]!;
-  const b = p.t[p.dated - 1]!;
+  const a = p.t[lo]!;
+  const b = p.t[hi]!;
   const pad = Math.max((b - a) * 0.03, 86400);
   return [a - pad, b + pad];
 }
@@ -173,7 +187,7 @@ export function Timeline(props: TimelineProps) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 100 });
-  const extent = useMemo(() => dataExtent(points), [points]);
+  const extent = useMemo(() => dataExtent(points, props.membership), [points, props.membership]);
   const [view, setView] = useState<Range>(extent);
   const [draft, setDraftState] = useState<Range | null>(null); // selection while dragging
   const draftRef = useRef<Range | null>(null);
@@ -231,8 +245,8 @@ export function Timeline(props: TimelineProps) {
   );
 
   const bins = useMemo(
-    () => computeBins(points, view, size.w, props.kinds, props.mapMask),
-    [points, view, size.w, props.kinds, props.mapMask],
+    () => computeBins(points, view, size.w, props.kinds, props.mapMask, props.membership),
+    [points, view, size.w, props.kinds, props.mapMask, props.membership],
   );
 
   const shown = draft ?? selection;

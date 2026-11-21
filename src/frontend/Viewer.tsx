@@ -23,6 +23,9 @@ import { MiniMap } from "./MiniMap";
 import type { LatLon } from "./coords";
 import { useZoom } from "./zoom";
 import { useBackToClose } from "./history";
+import { albumRequest } from "./AlbumViews";
+import { Icon, IconButton } from "./Icons";
+import type { AlbumSummary } from "../albums";
 
 interface PhotoDetail {
   id: number;
@@ -68,6 +71,11 @@ interface ViewerProps {
   onLocationChange(): void;
   /** The photo was moved to the Trash and is gone from the index. */
   onDeleted(id: number): void;
+  favorites: ReadonlySet<number>;
+  albumsRevision: number;
+  albumPickerOpen: boolean;
+  onAddToAlbum(id: number): void;
+  onFavorite(id: number, favorite: boolean): Promise<void>;
 }
 
 async function sendEdits(url: string, method: string): Promise<PhotoDetail> {
@@ -153,6 +161,11 @@ export function Viewer({
   onShowOnMap,
   onLocationChange,
   onDeleted,
+  favorites,
+  albumsRevision,
+  albumPickerOpen,
+  onAddToAlbum,
+  onFavorite,
 }: ViewerProps) {
   useBackToClose(onClose);
   const id = ids[index]!;
@@ -163,12 +176,21 @@ export function Viewer({
    * effects only after paint, and a cached neighbour can finish loading before a reset would land. */
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const loaded = loadedId === id;
-  const [showInfo, setShowInfo] = useState(() => localStorageGet("pm.info") !== "0");
+  const [showInfo, setShowInfo] = useState(() => {
+    const preference = localStorageGet("pm.info");
+    return preference == null ? !matchMedia("(max-width: 900px)").matches : preference !== "0";
+  });
   const [editing, setEditing] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
   /** The photo editor is open. */
   const [editingPhoto, setEditingPhoto] = useState(false);
   const [menu, setMenu] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const [membership, setMembership] = useState<{ id: number; albums: Pick<AlbumSummary, "id" | "name">[] } | null>(
+    null,
+  );
+  const [pendingStar, setPendingStar] = useState<{ id: number; favorite: boolean } | null>(null);
+  const favorite = pendingStar?.id === id ? pendingStar.favorite : favorites.has(id);
   const [notice, setNotice] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const hint = useMemo(() => (editing && i != null ? nearestTagged(points, i) : null), [editing, points, i]);
@@ -182,6 +204,26 @@ export function Viewer({
   /** Photo id whose original has been decoded and replaces the 2048px preview. */
   const [fullId, setFullId] = useState<number | null>(null);
   const fullRequested = useRef<string | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    albumRequest<Pick<AlbumSummary, "id" | "name">[]>(`photos/${id}/albums`, "GET", undefined, ac.signal)
+      .then((albums) => setMembership({ id, albums }))
+      .catch(() => {});
+    return () => ac.abort();
+  }, [id, albumsRevision]);
+
+  const toggleFavorite = async () => {
+    if (pendingStar) return;
+    setPendingStar({ id, favorite: !favorite });
+    try {
+      await onFavorite(id, !favorite);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setPendingStar(null);
+    }
+  };
 
   useEffect(() => {
     setEditing(false);
@@ -223,11 +265,13 @@ export function Viewer({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The editor has keys of its own.
-      if (editingPhoto) return;
+      if (editingPhoto || albumPickerOpen) return;
       // Typing coordinates must not flip photos or close the viewer.
       if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
-      if (e.key === "Escape" && menu) setMenu(false);
-      else if (e.key === "Escape" && zoom.zoomed) zoom.reset();
+      if (e.key === "Escape" && menu) {
+        setMenu(false);
+        menuButton.current?.focus();
+      } else if (e.key === "Escape" && zoom.zoomed) zoom.reset();
       else if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" && index < ids.length - 1) onIndex(index + 1);
       else if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
@@ -446,56 +490,74 @@ export function Viewer({
             {nf.format(index + 1)} / {nf.format(ids.length)}
           </span>
           <div className="viewer-top-actions">
-            {d && d.kind !== "video" && (
-              <button
-                className="btn btn-overlay"
+            <IconButton
+              name="star"
+              label={favorite ? "Remove from Favorites" : "Add to Favorites"}
+              className="btn-overlay viewer-star"
+              aria-pressed={favorite}
+              disabled={pendingStar != null}
+              onClick={() => void toggleFavorite()}
+            />
+            {!isVideo && (
+              <IconButton
+                name="edit"
+                label="Edit (E)"
+                className="btn-overlay"
+                disabled={!d || working}
                 onClick={() => setEditingPhoto(true)}
+              />
+            )}
+            <IconButton
+              name="info"
+              label="Info (I)"
+              className="btn-overlay"
+              aria-pressed={showInfo}
+              onClick={toggleInfo}
+            />
+            <div className="menu-wrap">
+              <IconButton
+                name="more"
+                label="More"
+                ref={menuButton}
+                className="btn-overlay"
+                aria-expanded={menu}
+                aria-controls={menu ? "viewer-actions" : undefined}
                 disabled={working}
-                title="Edit (e)"
-              >
-                Edit
-              </button>
-            )}
-            {d?.edits && (
-              <div className="menu-wrap">
-                <button
-                  className="btn btn-overlay"
-                  onClick={() => setMenu((m) => !m)}
-                  aria-haspopup="menu"
-                  aria-expanded={menu}
-                  aria-label="More"
-                  title="More"
-                  disabled={working}
-                >
-                  {working ? "…" : "⋯"}
-                </button>
-                {menu && (
-                  <div className="menu" role="menu">
-                    <button role="menuitem" onClick={revertEdits}>
-                      Revert to original
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={writeEdits}
-                      disabled={!d.writable}
-                      title={
-                        d.writable
-                          ? undefined
-                          : "Only JPEG, PNG, WebP and TIFF files can be rewritten. Save a copy instead."
-                      }
-                    >
-                      Write edits into file…
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-            <button className="btn btn-overlay" onClick={toggleInfo} title="Info (i)">
-              Info
-            </button>
-            <button className="btn btn-overlay" onClick={onClose} title="Close (Esc)" aria-label="Close">
-              ✕
-            </button>
+                onClick={() => setMenu((m) => !m)}
+              />
+              {menu && (
+                <div className="menu viewer-action-menu" id="viewer-actions">
+                  <button
+                    onClick={() => {
+                      menuButton.current?.focus();
+                      setMenu(false);
+                      onAddToAlbum(id);
+                    }}
+                  >
+                    <Icon name="addAlbum" /> Add to album…
+                  </button>
+                  {d?.edits && (
+                    <>
+                      <button onClick={revertEdits}>
+                        <Icon name="revert" /> Revert to original
+                      </button>
+                      <button
+                        onClick={writeEdits}
+                        disabled={!d.writable}
+                        title={
+                          d.writable
+                            ? undefined
+                            : "Only JPEG, PNG, WebP and TIFF files can be rewritten. Save a copy instead."
+                        }
+                      >
+                        <Icon name="write" /> Write edits into file…
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            {!showInfo && <IconButton name="close" label="Close (Esc)" className="btn-overlay" onClick={onClose} />}
           </div>
         </div>
         {notice && (
@@ -516,7 +578,8 @@ export function Viewer({
       </div>
 
       {showInfo && (
-        <aside className={`viewer-info ${editing ? "is-editing" : ""}`}>
+        <aside className={`viewer-info viewer-details ${editing ? "is-editing" : ""}`} aria-label="Photo information">
+          <IconButton name="close" label="Close (Esc)" className="viewer-close" onClick={onClose} />
           {!d ? (
             <div className="dim">Loading…</div>
           ) : (
@@ -620,6 +683,20 @@ export function Viewer({
                   <button className="btn btn-small" onClick={() => setEditing(true)}>
                     Add location
                   </button>
+                </section>
+              )}
+
+              {membership?.id === id && membership.albums.length > 0 && (
+                <section>
+                  <h4>Albums</h4>
+                  <ul className="viewer-albums">
+                    {membership.albums.map((album) => (
+                      <li key={album.id}>
+                        <Icon name="album" />
+                        <span>{album.name}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </section>
               )}
 

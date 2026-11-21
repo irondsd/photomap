@@ -40,8 +40,8 @@ export class ClusterClient {
     this.post({ type: "load", t: p.t.slice(), lat: p.lat.slice(), lon: p.lon.slice(), kind: p.kind.slice() });
   }
 
-  filter(range: Range | null, kinds: number) {
-    this.post({ type: "filter", range, kinds });
+  filter(range: Range | null, kinds: number, membership: Uint8Array | null) {
+    this.post({ type: "filter", range, kinds, membership });
     if (this.lastView) this.query(this.lastView.bbox, this.lastView.zoom);
   }
 

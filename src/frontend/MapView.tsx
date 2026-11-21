@@ -85,10 +85,9 @@ export function MapView(props: MapViewProps) {
     };
     map.on("move", onMove);
     map.on("moveend", report);
-    map.once("load", () => {
-      report();
-      cb.current.onReady(map);
-    });
+    map.once("load", report);
+    cb.current.onReady(map);
+    report();
     return () => {
       if (timer) clearTimeout(timer);
       map.remove();

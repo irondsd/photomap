@@ -8,12 +8,21 @@ import { Sidebar, type SidebarTab } from "./Sidebar";
 import { Viewer } from "./Viewer";
 import { AddFolder, Library, ScanProgress, type ScanStatus, type Stats } from "./Library";
 import { Gallery } from "./Gallery";
+import { albumRequest, AlbumEditDialog, AlbumHeader, AlbumList, AlbumPicker } from "./AlbumViews";
+import { IconButton } from "./Icons";
+import { afterOverlayClose } from "./history";
+import type { AlbumCatalog, AlbumSummary } from "../albums";
 
-type Mode = "map" | "gallery";
+type Mode = "map" | "gallery" | "albums";
+interface Destination {
+  mode: Mode;
+  album: number | null;
+}
 
-// ---------------------------------------------------------------- URL state: #view=gallery&map=lat,lon,zoom&t=from,to
+// ---------------------------------------------------------------- URL state
 interface HashState {
   mode: Mode | null;
+  album: number | null;
   map: { center: [number, number]; zoom: number } | null;
   t: Range | null;
 }
@@ -23,22 +32,26 @@ function readHash(): HashState {
   const m = q.get("map")?.split(",").map(Number);
   const t = q.get("t")?.split(",").map(Number);
   const v = q.get("view");
+  const rawAlbum = q.get("album");
+  const album = rawAlbum == null ? NaN : Number(rawAlbum);
   return {
-    mode: v === "gallery" || v === "map" ? v : null,
+    mode: v === "gallery" || v === "map" || v === "albums" ? v : null,
+    album: v !== "gallery" && rawAlbum && Number.isSafeInteger(album) && album >= 0 ? album : null,
     map: m && m.length === 3 && m.every(Number.isFinite) ? { center: [m[1]!, m[0]!], zoom: m[2]! } : null,
     t: t && t.length === 2 && t.every(Number.isFinite) && t[0]! < t[1]! ? [t[0]!, t[1]!] : null,
   };
 }
 
-function writeHash(mode: Mode, map: MlMap | null, t: Range | null) {
+function viewHash({ mode, album }: Destination, map: MlMap | null, t: Range | null) {
   const q = new URLSearchParams();
-  if (mode === "gallery") q.set("view", "gallery");
+  q.set("view", mode);
+  if (album != null) q.set("album", String(album));
   if (map) {
     const c = map.getCenter();
     q.set("map", `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom().toFixed(2)}`);
   }
   if (t) q.set("t", `${Math.round(t[0])},${Math.round(t[1])}`);
-  history.replaceState(null, "", `#${q.toString().replaceAll("%2C", ",")}`);
+  return `#${q.toString().replaceAll("%2C", ",")}`;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -56,7 +69,12 @@ function passes(p: Points, i: number, range: Range | null, kinds: number) {
 }
 
 /** Bounds of geotagged photos passing the filter, or null. */
-function boundsOf(p: Points, range: Range | null, kinds: number): LngLatBoundsLike | null {
+function boundsOf(
+  p: Points,
+  range: Range | null,
+  kinds: number,
+  membership: Uint8Array | null = null,
+): LngLatBoundsLike | null {
   let w = 180,
     s = 90,
     e = -180,
@@ -66,7 +84,7 @@ function boundsOf(p: Points, range: Range | null, kinds: number): LngLatBoundsLi
   const hi = range ? lowerBound(p.t, p.dated, range[1]) : p.n;
   for (let i = lo; i < hi; i++) {
     const la = p.lat[i]!;
-    if (Number.isNaN(la) || !passes(p, i, range, kinds)) continue;
+    if (Number.isNaN(la) || (membership && !membership[i]) || !passes(p, i, range, kinds)) continue;
     const lo2 = p.lon[i]!;
     if (la < s) s = la;
     if (la > n) n = la;
@@ -174,10 +192,12 @@ function ThemeSwitch(props: { value: ThemePref; onChange: (t: ThemePref) => void
 }
 
 const EMPTY = new Int32Array(0);
+const EMPTY_RESULT: ClusterResult = { clusters: [], visible: EMPTY, total: 0 };
 
 function savedMode(): Mode {
   try {
-    return localStorage.getItem("pm.view") === "gallery" ? "gallery" : "map";
+    const mode = localStorage.getItem("pm.view");
+    return mode === "gallery" || mode === "albums" ? mode : "map";
   } catch {
     return "map";
   }
@@ -186,15 +206,20 @@ function savedMode(): Mode {
 export function App() {
   const initialHash = useRef(readHash()).current;
   const { pref: theme, setPref: setTheme, dark } = useTheme();
-  const [mode, setModeState] = useState<Mode>(() => initialHash.mode ?? savedMode());
+  const [destination, setDestination] = useState<Destination>(() => ({
+    mode: initialHash.mode ?? (initialHash.album != null ? "map" : savedMode()),
+    album: initialHash.album,
+  }));
+  const { mode, album: albumId } = destination;
   // Each view is built the first time it's shown, then kept (map position, gallery scroll).
   // A map created while hidden has no size and would fit its bounds to nothing.
   const [galleryMounted, setGalleryMounted] = useState(mode === "gallery");
   const [mapMounted, setMapMounted] = useState(mode === "map");
-  const setMode = useCallback((m: Mode) => {
-    setModeState(m);
+  const activate = useCallback((next: Destination) => {
+    setDestination((current) => (current.mode === next.mode && current.album === next.album ? current : next));
+    const m = next.mode;
     if (m === "gallery") setGalleryMounted(true);
-    else setMapMounted(true);
+    if (m === "map") setMapMounted(true);
     try {
       localStorage.setItem("pm.view", m);
     } catch {
@@ -207,16 +232,56 @@ export function App() {
   const [kinds, setKinds] = useState<number>(ALL_KINDS);
   const [selection, setSelection] = useState<Range | null>(initialHash.t);
   const [view, setView] = useState<{ bbox: BBox; zoom: number } | null>(null);
-  const [result, setResult] = useState<ClusterResult>({ clusters: [], visible: EMPTY, total: 0 });
+  const [clusterQuery, setClusterQuery] = useState<{
+    result: ClusterResult;
+    membership: Uint8Array | null;
+  } | null>(null);
   const [followMap, setFollowMap] = useState(false);
   const [tab, setTab] = useState<SidebarTab>("map");
   // Photo ids, so the viewer stays on the same photo when the points are reloaded.
   const [viewer, setViewer] = useState<{ ids: Uint32Array; index: number } | null>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [catalog, setCatalog] = useState<AlbumCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  const [albumsRevision, setAlbumsRevision] = useState(0);
+  const [albumMembers, setAlbumMembers] = useState<{ album: number; ids: number[] } | null>(null);
+  const [membersError, setMembersError] = useState<{ album: number; text: string } | null>(null);
+  const [albumPicker, setAlbumPicker] = useState<{ ids: number[]; onDone?: () => void } | null>(null);
+  const [albumEdit, setAlbumEdit] = useState<{ album: AlbumSummary; remove: boolean } | null>(null);
+  const [coverDraft, setCoverDraft] = useState<{
+    albumId: number;
+    candidate: number | null;
+    saving: boolean;
+    error: string;
+  } | null>(null);
+  const [albumNotice, setAlbumNotice] = useState("");
   const mapRef = useRef<MlMap | null>(null);
+  const pendingAlbumFit = useRef(mode === "map" && !initialHash.map ? albumId : null);
+  const [photoFocus, setPhotoFocus] = useState<{ center: [number, number]; id: number } | null>(null);
   const clientRef = useRef<ClusterClient | null>(null);
+  const clusterMembership = useRef<Uint8Array | null>(null);
   const loadedVersion = useRef<string | null>(null);
+
+  const navigate = useCallback(
+    (m: Mode, album: number | null = null, range = selection, replace = false) => {
+      const next = { mode: m, album };
+      const hash = viewHash(next, mapRef.current, range);
+      if (replace) history.replaceState(history.state, "", hash);
+      else if (m !== mode || album !== albumId) {
+        history.replaceState(history.state, "", viewHash(destination, mapRef.current, selection));
+        const fromAlbumIndex = m === "albums" && album != null && mode === "albums" && albumId == null;
+        history.pushState(fromAlbumIndex ? { fromAlbumIndex: true } : null, "", hash);
+      }
+      activate(next);
+      setSelection(range);
+    },
+    [activate, albumId, destination, mode, selection],
+  );
+  const backToAlbums = () => {
+    if (history.state?.fromAlbumIndex) history.back();
+    else navigate("albums", null, selection, true);
+  };
 
   // ------------------------------------------------------------ data loading
   const refresh = useCallback(async () => {
@@ -231,6 +296,102 @@ export function App() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const albumsChanged = useCallback(() => setAlbumsRevision((n) => n + 1), []);
+  useEffect(() => {
+    const request = new AbortController();
+    setCatalogError("");
+    albumRequest<AlbumCatalog>("albums", "GET", undefined, request.signal)
+      .then(setCatalog)
+      .catch((err: Error) => {
+        if (!request.signal.aborted) setCatalogError(err.message);
+      });
+    return () => request.abort();
+  }, [points, albumsRevision]);
+
+  useEffect(() => {
+    if (albumId == null || albumId === 0) return;
+    const request = new AbortController();
+    setMembersError(null);
+    albumRequest<number[]>(`albums/${albumId}`, "GET", undefined, request.signal)
+      .then((ids) => setAlbumMembers({ album: albumId, ids }))
+      .catch((err: Error) => {
+        if (!request.signal.aborted) setMembersError({ album: albumId, text: err.message });
+      });
+    return () => request.abort();
+  }, [albumId, points, albumsRevision]);
+
+  const activeAlbum = albumId === 0 ? catalog?.favorites : catalog?.albums.find((a) => a.id === albumId);
+  const albumIds =
+    albumId === 0 ? catalog?.favorites.ids : albumMembers?.album === albumId ? albumMembers?.ids : undefined;
+  const favorites = useMemo(() => new Set(catalog?.favorites.ids), [catalog?.favorites.ids]);
+  const idIndex = useMemo(() => {
+    const m = new Map<number, number>();
+    if (points) for (let i = 0; i < points.n; i++) m.set(points.id[i]!, i);
+    return m;
+  }, [points]);
+  const indexOf = useCallback((id: number) => idIndex.get(id), [idIndex]);
+  const pickingCover = mode === "albums" && coverDraft?.albumId === albumId ? coverDraft : null;
+  const canPickCover = albumIds?.some((id) => {
+    const i = indexOf(id);
+    return i != null && points!.kind[i] !== 2;
+  });
+
+  useEffect(() => {
+    setCoverDraft(null);
+  }, [mode, albumId]);
+
+  useEffect(() => {
+    if (!pickingCover || pickingCover.saving) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCoverDraft(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickingCover]);
+
+  const saveCover = async () => {
+    if (!pickingCover || pickingCover.candidate == null || pickingCover.saving) return;
+    const { albumId, candidate } = pickingCover;
+    setCoverDraft({ ...pickingCover, saving: true, error: "" });
+    try {
+      await albumRequest(`albums/${albumId}/cover`, "PUT", { photoId: candidate });
+      setCatalog(
+        (current) =>
+          current && {
+            ...current,
+            albums: current.albums.map((album) => (album.id === albumId ? { ...album, coverId: candidate } : album)),
+          },
+      );
+      setCoverDraft((draft) => (draft?.albumId === albumId && draft.saving ? null : draft));
+      setAlbumNotice("Album cover updated");
+      albumsChanged();
+    } catch (error) {
+      setCoverDraft((draft) =>
+        draft?.albumId === albumId && draft.saving
+          ? { ...draft, saving: false, error: (error as Error).message }
+          : draft,
+      );
+    }
+  };
+  const albumMask = useMemo(() => {
+    if (!points || albumId == null) return null;
+    const mask = new Uint8Array(points.n);
+    for (const id of albumIds ?? []) {
+      const i = idIndex.get(id);
+      if (i != null) mask[i] = 1;
+    }
+    return mask;
+  }, [albumId, albumIds, idIndex, points]);
+  const mapAlbumMask = mode === "map" ? albumMask : null;
+  const result = clusterQuery?.membership === mapAlbumMask ? clusterQuery.result : EMPTY_RESULT;
+  const albumBounds = useMemo(
+    () => (points && albumMask && albumIds ? boundsOf(points, null, ALL_KINDS, albumMask) : null),
+    [points, albumMask, albumIds],
+  );
 
   // Poll scan status while a scan runs; reload the index as it lands.
   const pollScan = useCallback(async () => {
@@ -264,7 +425,7 @@ export function App() {
 
   // ------------------------------------------------------------ clustering
   useEffect(() => {
-    const client = new ClusterClient(setResult);
+    const client = new ClusterClient((result) => setClusterQuery({ result, membership: clusterMembership.current }));
     clientRef.current = client;
     return () => client.dispose();
   }, []);
@@ -272,14 +433,13 @@ export function App() {
   useEffect(() => {
     if (!points) return;
     clientRef.current!.load(points);
-    clientRef.current!.filter(selection, kinds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the effect below re-filters on selection/kind changes.
   }, [points]);
 
   useEffect(() => {
-    if (points) clientRef.current!.filter(selection, kinds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- new points are loaded and filtered above.
-  }, [selection, kinds]);
+    if (!points) return;
+    clusterMembership.current = mapAlbumMask;
+    clientRef.current!.filter(selection, kinds, mapAlbumMask);
+  }, [points, selection, kinds, mapAlbumMask]);
 
   const onView = useCallback((bbox: BBox, zoom: number) => {
     setView({ bbox, zoom });
@@ -291,13 +451,14 @@ export function App() {
     if (!points) return EMPTY;
     const out: number[] = [];
     for (let i = points.n - 1; i >= 0; i--) {
-      if (Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds)) out.push(i);
+      if ((!mapAlbumMask || mapAlbumMask[i]) && Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds))
+        out.push(i);
     }
     // Undated photos sit at the end of the index; show them last.
     return Int32Array.from(
       out.sort((a, b) => (Number.isNaN(points.t[a]!) ? 1 : 0) - (Number.isNaN(points.t[b]!) ? 1 : 0)),
     );
-  }, [points, selection, kinds]);
+  }, [points, selection, kinds, mapAlbumMask]);
 
   const mapMask = useMemo(() => {
     if (!followMap || !points || !view) return null;
@@ -310,41 +471,98 @@ export function App() {
   }, [followMap, points, view]);
 
   // ------------------------------------------------------------ URL sync
-  // replaceState (below) doesn't fire hashchange, so this only reacts to edits and pasted links.
   useEffect(() => {
     const onHash = () => {
       const h = readHash();
-      if (h.mode) setMode(h.mode);
+      activate({ mode: h.mode ?? (h.album == null ? savedMode() : "map"), album: h.album });
       setSelection(h.t);
       if (h.map) mapRef.current?.jumpTo({ center: h.map.center, zoom: h.map.zoom });
+      pendingAlbumFit.current = h.mode === "map" && !h.map ? h.album : null;
     };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, [setMode]);
+    window.addEventListener("popstate", onHash);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("popstate", onHash);
+    };
+  }, [activate]);
 
   useEffect(() => {
-    const id = setTimeout(() => writeHash(mode, mapRef.current, selection), 300);
+    const id = setTimeout(() => {
+      history.replaceState(history.state, "", viewHash(destination, mapRef.current, selection));
+    }, 300);
     return () => clearTimeout(id);
-  }, [mode, view, selection]);
+  }, [destination, view, selection]);
 
   // The map was hidden with display: none; let it measure itself again.
+  const mapHasView = view != null;
   useEffect(() => {
-    if (mode === "map") requestAnimationFrame(() => mapRef.current?.resize());
-  }, [mode]);
+    if (mode !== "map" || !mapHasView) return;
+    const frame = requestAnimationFrame(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.resize();
+      if (photoFocus) {
+        setPhotoFocus(null);
+        map.flyTo({ center: photoFocus.center, zoom: Math.max(map.getZoom(), 15), duration: 900 });
+        const i = indexOf(photoFocus.id);
+        if (i != null) {
+          setHover(i);
+          setTimeout(() => setHover((h) => (h === i ? null : h)), 3500);
+        }
+      } else if (pendingAlbumFit.current != null && pendingAlbumFit.current === albumId && albumBounds) {
+        pendingAlbumFit.current = null;
+        map.fitBounds(albumBounds, { padding: 64, maxZoom: 14, duration: 700 });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode, mapHasView, albumId, albumBounds, indexOf, photoFocus]);
 
   // ------------------------------------------------------------ actions
   const fitToPhotos = useCallback(() => {
     if (!points || !mapRef.current) return;
-    const b = boundsOf(points, selection, kinds);
+    const b = boundsOf(points, selection, kinds, mapAlbumMask);
     if (b) mapRef.current.fitBounds(b, { padding: 80, maxZoom: 14, duration: 700 });
-  }, [points, selection, kinds]);
+  }, [points, selection, kinds, mapAlbumMask]);
 
-  const idIndex = useMemo(() => {
-    const m = new Map<number, number>();
-    if (points) for (let i = 0; i < points.n; i++) m.set(points.id[i]!, i);
-    return m;
-  }, [points]);
-  const indexOf = useCallback((id: number) => idIndex.get(id), [idIndex]);
+  const showAlbumMap = () => {
+    pendingAlbumFit.current = albumId;
+    setKinds(ALL_KINDS);
+    setTab("map");
+    navigate("map", albumId, null);
+  };
+
+  const saveFavorite = async (id: number, favorite: boolean) => {
+    await albumRequest(`photos/${id}/favorite`, "PUT", { favorite });
+    setCatalog(
+      (current) =>
+        current && {
+          ...current,
+          favorites: {
+            ...current.favorites,
+            ids: favorite
+              ? [...new Set([...current.favorites.ids, id])]
+              : current.favorites.ids.filter((item) => item !== id),
+          },
+        },
+    );
+    albumsChanged();
+  };
+
+  const removeFromAlbum = async (ids: number[]) => {
+    await albumRequest(`albums/${albumId}/members`, "POST", { ids, remove: true });
+    const removed = new Set(ids);
+    setAlbumMembers((current) =>
+      current?.album === albumId ? { ...current, ids: current.ids.filter((id) => !removed.has(id)) } : current,
+    );
+    albumsChanged();
+  };
+
+  useEffect(() => {
+    if (!albumNotice) return;
+    const timer = setTimeout(() => setAlbumNotice(""), 3500);
+    return () => clearTimeout(timer);
+  }, [albumNotice]);
 
   /** Opens the viewer on a list of point indices. */
   const openViewer = useCallback(
@@ -371,26 +589,24 @@ export function App() {
 
   const showOnMap = useCallback(
     (i: number) => {
-      if (!points || !mapRef.current) return;
-      setViewer(null);
-      setTab("map");
-      setMode("map");
-      // After the map is visible again and has its size back.
-      requestAnimationFrame(() => {
-        const map = mapRef.current;
-        if (!map) return;
-        map.resize();
-        map.flyTo({ center: [points.lon[i]!, points.lat[i]!], zoom: Math.max(map.getZoom(), 15), duration: 900 });
+      if (!points) return;
+      const center: [number, number] = [points.lon[i]!, points.lat[i]!];
+      const id = points.id[i]!;
+      afterOverlayClose(() => {
+        setTab("map");
+        pendingAlbumFit.current = null;
+        setPhotoFocus({ center, id });
+        navigate("map", albumId);
       });
-      setHover(i);
-      setTimeout(() => setHover((h) => (h === i ? null : h)), 3500);
+      setViewer(null);
     },
-    [points, setMode],
+    [points, albumId, navigate],
   );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (mode !== "map" || viewer || libraryOpen || (e.target as HTMLElement)?.closest?.("input, textarea")) return;
+      if (mode !== "map" || viewer || libraryOpen || (e.target as HTMLElement)?.closest?.("input, textarea, dialog"))
+        return;
       if (e.key === "Escape" && selection) setSelection(null);
     };
     window.addEventListener("keydown", onKey);
@@ -400,13 +616,20 @@ export function App() {
   // ------------------------------------------------------------ render
   const isEmpty = stats != null && stats.total === 0;
   useEffect(() => {
-    if (isEmpty && mode === "gallery") setMode("map");
-  }, [isEmpty, mode, setMode]);
+    if (isEmpty && mode === "gallery") navigate("map", null, selection, true);
+  }, [isEmpty, mode, navigate, selection]);
   const initialBounds = useMemo(
     () => (points && !initialHash.map ? boundsOf(points, null, ALL_KINDS) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the first load positions the map.
     [points !== null],
   );
+  const paused = viewer != null || libraryOpen || albumPicker != null || albumEdit != null;
+  const openAlbumPicker = (ids: number[], onDone?: () => void) => setAlbumPicker({ ids, onDone });
+  const albumLabel = activeAlbum?.name ?? (catalog && !catalogError ? "Album unavailable" : "Loading album…");
+  const albumProblem =
+    catalogError ||
+    (membersError?.album === albumId ? membersError?.text : "") ||
+    (catalog && albumId != null && !activeAlbum ? "This album is no longer available." : "");
 
   return (
     <div className="app">
@@ -416,11 +639,25 @@ export function App() {
           Photomap
         </div>
         <div className="segmented" role="group" aria-label="View">
-          <button aria-pressed={mode === "map"} onClick={() => setMode("map")}>
+          <button
+            aria-pressed={mode === "map"}
+            onClick={() => {
+              if (mode !== "map") navigate("map");
+            }}
+          >
             Map
           </button>
-          <button aria-pressed={mode === "gallery"} disabled={isEmpty} onClick={() => setMode("gallery")}>
+          <button aria-pressed={mode === "gallery"} disabled={isEmpty} onClick={() => navigate("gallery")}>
             Gallery
+          </button>
+          <button
+            aria-pressed={mode === "albums"}
+            onClick={() => {
+              if (mode === "albums" && albumId != null) backToAlbums();
+              else navigate("albums");
+            }}
+          >
+            Albums
           </button>
         </div>
         <div className="segmented segmented-kinds" role="group" aria-label="Media type">
@@ -463,6 +700,21 @@ export function App() {
                   onReady={(m) => (mapRef.current = m)}
                 />
               )}
+              {mode === "map" && albumId != null && (
+                <div className="map-album-filter">
+                  <span>
+                    Viewing album <strong>{albumLabel}</strong>
+                  </span>
+                  <IconButton
+                    name="close"
+                    label="Clear album filter"
+                    onClick={() => {
+                      pendingAlbumFit.current = null;
+                      navigate("map", null, selection, true);
+                    }}
+                  />
+                </div>
+              )}
               {points && result.total > 0 && (
                 <button
                   className="btn btn-float fit-btn"
@@ -493,6 +745,7 @@ export function App() {
                 selection={selection}
                 onSelect={setSelection}
                 mapMask={mapMask}
+                membership={mapAlbumMask}
                 followMap={followMap}
                 onFollowMap={setFollowMap}
                 hoverT={hover != null ? points.t[hover]! : null}
@@ -518,11 +771,116 @@ export function App() {
               points={points}
               kinds={kinds}
               active={mode === "gallery"}
-              paused={viewer != null || libraryOpen}
+              paused={paused}
               indexOf={indexOf}
               onOpen={openViewer}
               onLocationsChanged={refresh}
+              favorites={favorites}
+              onAddToAlbum={openAlbumPicker}
             />
+          </div>
+        )}
+        {mode === "albums" &&
+          albumId == null &&
+          (catalog ? (
+            <AlbumList
+              albums={[catalog.favorites, ...catalog.albums]}
+              onOpen={(id) => navigate("albums", id)}
+              onCreate={() => openAlbumPicker([])}
+            />
+          ) : (
+            <div className="empty">
+              {catalogError ? (
+                <>
+                  <p role="alert">{catalogError}</p>
+                  <button className="btn" onClick={albumsChanged}>
+                    Try again
+                  </button>
+                </>
+              ) : (
+                "Loading albums…"
+              )}
+            </div>
+          ))}
+        {albumId != null && (
+          <div className="album-detail" hidden={mode !== "albums"} key={albumId}>
+            {activeAlbum && (
+              <AlbumHeader
+                album={activeAlbum}
+                hasLocations={albumIds && points ? albumBounds != null : null}
+                onBack={backToAlbums}
+                onMap={showAlbumMap}
+                onRename={() => setAlbumEdit({ album: activeAlbum, remove: false })}
+                onDelete={() => setAlbumEdit({ album: activeAlbum, remove: true })}
+                onPickCover={
+                  canPickCover
+                    ? () =>
+                        setCoverDraft({
+                          albumId,
+                          candidate: null,
+                          saving: false,
+                          error: "",
+                        })
+                    : undefined
+                }
+                coverPicker={
+                  pickingCover
+                    ? {
+                        ...pickingCover,
+                        onSave: saveCover,
+                        onCancel: () => setCoverDraft(null),
+                      }
+                    : undefined
+                }
+              />
+            )}
+            {albumProblem ? (
+              <div className="empty">
+                <p role="alert">{albumProblem}</p>
+                <div className="row">
+                  <button className="btn" onClick={backToAlbums}>
+                    All albums
+                  </button>
+                  <button className="btn" onClick={albumsChanged}>
+                    Try again
+                  </button>
+                </div>
+              </div>
+            ) : activeAlbum && points && albumIds && albumMask ? (
+              <Gallery
+                points={points}
+                kinds={kinds}
+                active={mode === "albums"}
+                paused={paused}
+                indexOf={indexOf}
+                onOpen={openViewer}
+                onLocationsChanged={refresh}
+                favorites={favorites}
+                membership={albumMask}
+                oldestFirst={albumId !== 0}
+                onAddToAlbum={openAlbumPicker}
+                onRemoveFromAlbum={albumId === 0 ? undefined : removeFromAlbum}
+                coverPicker={
+                  pickingCover
+                    ? {
+                        current: activeAlbum.coverId,
+                        candidate: pickingCover.candidate,
+                        saving: pickingCover.saving,
+                        onPick: (id) => setCoverDraft((draft) => draft && { ...draft, candidate: id, error: "" }),
+                      }
+                    : undefined
+                }
+                emptyMessage={
+                  albumId === 0 && !albumIds.length
+                    ? "Star a photo or video to find it here."
+                    : !albumIds.length
+                      ? "Select photos in the gallery to add them to this album."
+                      : undefined
+                }
+              />
+            ) : (
+              <div className="empty">Loading album…</div>
+            )}
           </div>
         )}
       </main>
@@ -537,6 +895,11 @@ export function App() {
           onClose={() => setViewer(null)}
           onShowOnMap={showOnMap}
           onLocationChange={refresh}
+          favorites={favorites}
+          albumsRevision={albumsRevision}
+          albumPickerOpen={albumPicker != null}
+          onAddToAlbum={(id) => openAlbumPicker([id])}
+          onFavorite={saveFavorite}
           onDeleted={(id) => {
             // On to the next photo (the previous one at the end); closed when none are left.
             setViewer((v) => {
@@ -546,6 +909,36 @@ export function App() {
             refresh();
           }}
         />
+      )}
+      {albumPicker && (
+        <AlbumPicker
+          albums={catalog?.albums ?? []}
+          ids={albumPicker.ids}
+          onClose={() => setAlbumPicker(null)}
+          onSaved={(name) => {
+            albumPicker.onDone?.();
+            setAlbumPicker(null);
+            albumsChanged();
+            setAlbumNotice(albumPicker.ids.length ? `Added to ${name}` : `Created ${name}`);
+          }}
+        />
+      )}
+      {albumEdit && (
+        <AlbumEditDialog
+          album={albumEdit.album}
+          remove={albumEdit.remove}
+          onClose={() => setAlbumEdit(null)}
+          onSaved={() => {
+            if (albumEdit.remove) afterOverlayClose(backToAlbums);
+            setAlbumEdit(null);
+            albumsChanged();
+          }}
+        />
+      )}
+      {albumNotice && (
+        <div className="album-notice" role="status">
+          {albumNotice}
+        </div>
       )}
       {libraryOpen && (
         <Library

@@ -16,10 +16,16 @@ const open: Entry[] = [];
 /** Pops we caused ourselves, for overlays closed some other way: not a Back for the next one down. */
 let ownPops = 0;
 let pendingBack = 0;
+let afterClose: (() => void) | null = null;
 
 window.addEventListener("popstate", () => {
   if (ownPops > 0) {
     ownPops--;
+    if (ownPops === 0 && afterClose) {
+      const run = afterClose;
+      afterClose = null;
+      queueMicrotask(run);
+    }
     return;
   }
   const top = open.at(-1);
@@ -30,6 +36,11 @@ window.addEventListener("popstate", () => {
     top.popped = false;
   }
 });
+
+/** Navigate after a closing overlay has given back its history entry. */
+export function afterOverlayClose(navigate: () => void) {
+  afterClose = navigate;
+}
 
 /** Overlays closing together (the viewer with its editor) go back in one step. */
 function goBack() {

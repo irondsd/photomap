@@ -3,6 +3,7 @@ import { formatMonth, formatYear, localStorageGet, localStorageSet, nf, SOURCE, 
 import { buildLayout, firstVisible, galleryOrder, groupAt, HEADER_H, rowHeightFor, type Layout } from "./galleryLayout";
 import { BulkDateDialog } from "./BulkDate";
 import { BulkLocationDialog } from "./BulkLocation";
+import { Icon } from "./Icons";
 
 // Room on the left for the day headers' select-all checks.
 const LEFT = 44;
@@ -24,9 +25,36 @@ interface GalleryProps {
   onOpen(list: Int32Array, index: number): void;
   /** Locations or dates were changed in bulk; reload the index. */
   onLocationsChanged(): void;
+  favorites: ReadonlySet<number>;
+  membership?: Uint8Array;
+  oldestFirst?: boolean;
+  emptyMessage?: string;
+  onAddToAlbum(ids: number[], onDone: () => void): void;
+  onRemoveFromAlbum?(ids: number[]): Promise<void>;
+  coverPicker?: {
+    current: number | null;
+    candidate: number | null;
+    saving: boolean;
+    onPick(id: number): void;
+  };
 }
 
-export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLocationsChanged }: GalleryProps) {
+export function Gallery({
+  points,
+  kinds,
+  active,
+  paused,
+  indexOf,
+  onOpen,
+  onLocationsChanged,
+  favorites,
+  membership,
+  oldestFirst,
+  emptyMessage = "No photos match this filter.",
+  onAddToAlbum,
+  onRemoveFromAlbum,
+  coverPicker,
+}: GalleryProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -37,6 +65,7 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkDateOpen, setBulkDateOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [albumError, setAlbumError] = useState("");
 
   useLayoutEffect(() => {
     const el = scroller.current!;
@@ -48,15 +77,20 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
     return () => ro.disconnect();
   }, []);
 
-  const order = useMemo(() => galleryOrder(points, kinds), [points, kinds]);
-  const contentW = Math.max(0, box.w - LEFT - SCRUBBER_W);
+  const grouped = !membership;
+  const order = useMemo(
+    () => galleryOrder(points, kinds, membership, oldestFirst),
+    [points, kinds, membership, oldestFirst],
+  );
+  const left = grouped ? LEFT : 16;
+  const contentW = Math.max(0, box.w - left - (grouped ? SCRUBBER_W : 16));
   const [zoom, setZoom] = useState(() => {
     const z = Number(localStorageGet(ZOOM_KEY));
     return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1;
   });
   const layout = useMemo(
-    () => (contentW > 0 ? buildLayout(points, order, contentW, LEFT, rowHeightFor(contentW) * zoom) : null),
-    [points, order, contentW, zoom],
+    () => (contentW > 0 ? buildLayout(points, order, contentW, left, rowHeightFor(contentW) * zoom, grouped) : null),
+    [points, order, contentW, left, zoom, grouped],
   );
 
   // Scroll position, at most once per frame.
@@ -204,7 +238,7 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
   );
 
   useEffect(() => {
-    if (!active || paused) return;
+    if (!active || paused || coverPicker) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
       if (e.key === "Escape" && selected.size) {
@@ -214,7 +248,7 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, paused, selected.size, clear]);
+  }, [active, paused, coverPicker, selected.size, clear]);
 
   const resetSelected = async () => {
     const n = manualIds.length;
@@ -299,12 +333,14 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
       const i = layout.order[k]!;
       const id = points.id[i]!;
       const sel = selected.has(id);
+      const isVideo = points.kind[i] === 2;
+      const currentCover = coverPicker?.current === id;
       items.push(
         <div
           key={id}
           className={`gtile ${sel ? "is-selected" : ""}`}
           style={{ left: layout.x[k], top: layout.y[k], width: layout.w[k], height: layout.h[k] }}
-          onClick={(e) => onTileClick(k, e)}
+          onClick={coverPicker ? undefined : (e) => onTileClick(k, e)}
         >
           <img
             src={thumbUrl(id, "m")}
@@ -314,7 +350,12 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
             draggable={false}
             onLoad={(e) => e.currentTarget.classList.add("is-loaded")}
           />
-          {points.kind[i] === 2 && <span className="gtile-video">▶</span>}
+          {isVideo && <span className="gtile-video">▶</span>}
+          {favorites.has(id) && (
+            <span className="gtile-star" title="Favorite" role="img" aria-label="Favorite">
+              <Icon name="star" />
+            </span>
+          )}
           {Number.isNaN(points.lat[i]!) && (
             <span className="gtile-nogeo" title="No location">
               <svg viewBox="0 0 24 24" aria-hidden>
@@ -323,16 +364,32 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
               </svg>
             </span>
           )}
-          <button
-            className="gcheck"
-            aria-pressed={sel}
-            aria-label="Select photo"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (e.shiftKey && anchor.current != null) selectRange(k);
-              else toggle(k);
-            }}
-          />
+          {coverPicker ? (
+            <button
+              type="button"
+              className="cover-pick-tile"
+              aria-label={
+                isVideo ? "Video" : currentCover ? `Current cover, photo ${k + 1}` : `Choose photo ${k + 1} as cover`
+              }
+              aria-pressed={coverPicker.candidate === id}
+              disabled={isVideo || coverPicker.saving}
+              title={isVideo ? "Choose a photo for the cover" : undefined}
+              onClick={() => coverPicker.onPick(id)}
+            >
+              {currentCover && <span>Current cover</span>}
+            </button>
+          ) : (
+            <button
+              className="gcheck"
+              aria-pressed={sel}
+              aria-label="Select photo"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (e.shiftKey && anchor.current != null) selectRange(k);
+                else toggle(k);
+              }}
+            />
+          )}
         </div>,
       );
     }
@@ -344,10 +401,10 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
         <div ref={content} className="gallery-content" style={{ height: layout?.height ?? 0 }}>
           {items}
         </div>
-        {layout && layout.order.length === 0 && <div className="empty">No photos match this filter.</div>}
+        {layout && layout.order.length === 0 && <div className="empty">{emptyMessage}</div>}
       </div>
 
-      {layout && layout.height > box.h && (
+      {grouped && layout && layout.height > box.h && (
         <Scrubber
           layout={layout}
           height={box.h}
@@ -356,12 +413,39 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
         />
       )}
 
-      {selecting && (
+      {selecting && !coverPicker && (
         <div className="selection-bar" role="toolbar" aria-label="Selection">
           <button className="btn btn-ghost" onClick={clear} aria-label="Clear selection" title="Clear selection (Esc)">
             ✕
           </button>
           <span className="selection-count">{nf.format(visibleSelection.length)} selected</span>
+          <button
+            className="btn btn-primary album-action"
+            disabled={!visibleSelection.length || busy}
+            onClick={() => onAddToAlbum(visibleSelection, clear)}
+          >
+            <Icon name="addAlbum" /> Add to album…
+          </button>
+          {onRemoveFromAlbum && (
+            <button
+              className="btn"
+              disabled={!visibleSelection.length || busy}
+              onClick={async () => {
+                setBusy(true);
+                setAlbumError("");
+                try {
+                  await onRemoveFromAlbum(visibleSelection);
+                  clear();
+                } catch (err) {
+                  setAlbumError((err as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Remove from album
+            </button>
+          )}
           <button
             className="btn btn-primary"
             disabled={!visibleSelection.length || busy}
@@ -397,6 +481,11 @@ export function Gallery({ points, kinds, active, paused, indexOf, onOpen, onLoca
               Reset {manualDateIds.length < visibleSelection.length ? nf.format(manualDateIds.length) : ""} date
               {manualDateIds.length === 1 ? "" : "s"}
             </button>
+          )}
+          {albumError && (
+            <span className="error" role="alert">
+              {albumError}
+            </span>
           )}
         </div>
       )}

@@ -2,6 +2,18 @@ import { join } from "node:path";
 import index from "./frontend/index.html";
 import { HOST, PORT, CPUS } from "./config";
 import {
+  albumCatalog,
+  albumPhotoIds,
+  changeAlbumMembers,
+  createAlbum,
+  deleteAlbum,
+  getAlbum,
+  photoAlbums,
+  renameAlbum,
+  setAlbumCover,
+  setFavorite,
+} from "./albums";
+import {
   db,
   deletePhoto,
   getPhoto,
@@ -257,6 +269,12 @@ const idParam = (s: string) => {
   return Number.isInteger(n) && n > 0 ? n : null;
 };
 
+function albumName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name && name.length <= 120 ? name : null;
+}
+
 // ---------------------------------------------------------------- server
 const server = Bun.serve({
   hostname: HOST,
@@ -275,6 +293,82 @@ const server = Bun.serve({
     },
 
     "/api/stats": { GET: guard(() => json({ ...stats(), version: currentVersion() })) },
+
+    "/api/albums": {
+      GET: guard(() => json(albumCatalog())),
+      POST: guard(async (req) => {
+        const body = (await req.json().catch(() => null)) as { name?: unknown; ids?: unknown } | null;
+        const name = albumName(body?.name);
+        if (!name) return bad("Enter an album name up to 120 characters.");
+        const ids = body?.ids === undefined ? [] : parseIds(body.ids);
+        if (!ids) return bad("ids must be a list of photo ids");
+        return json({ id: createAlbum(name, ids) }, { status: 201 });
+      }),
+    },
+
+    "/api/albums/:id": {
+      GET: guard((req) => {
+        const id = idParam(req.params.id);
+        if (!id || !getAlbum(id)) return bad("Album not found", 404);
+        return json(albumPhotoIds(id));
+      }),
+      PATCH: guard(async (req) => {
+        const id = idParam(req.params.id);
+        if (!id) return bad("Album not found", 404);
+        const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+        const name = albumName(body?.name);
+        if (!name) return bad("Enter an album name up to 120 characters.");
+        return renameAlbum(id, name) ? json({ ok: true }) : bad("Album not found", 404);
+      }),
+      DELETE: guard((req) => {
+        const id = idParam(req.params.id);
+        return id && deleteAlbum(id) ? json({ ok: true }) : bad("Album not found", 404);
+      }),
+    },
+
+    "/api/albums/:id/cover": {
+      PUT: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { photoId?: unknown } | null;
+        if (!id || !getAlbum(id)) return bad("Album not found", 404);
+        const photoId = body?.photoId;
+        if (typeof photoId !== "number" || !Number.isSafeInteger(photoId) || photoId <= 0) {
+          return bad("Choose a photo from this album.");
+        }
+        return setAlbumCover(id, photoId)
+          ? json({ ok: true })
+          : bad("This photo is no longer available in the album.", 409);
+      }),
+    },
+
+    "/api/albums/:id/members": {
+      POST: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { ids?: unknown; remove?: unknown } | null;
+        if (!id || !getAlbum(id)) return bad("Album not found", 404);
+        const ids = parseIds(body?.ids);
+        if (!ids) return bad("ids must be a non-empty list of photo ids");
+        changeAlbumMembers(id, ids, body?.remove === true);
+        return json({ ok: true });
+      }),
+    },
+
+    "/api/photos/:id/albums": {
+      GET: guard((req) => {
+        const id = idParam(req.params.id);
+        return id ? json(photoAlbums(id)) : bad("Photo not found", 404);
+      }),
+    },
+
+    "/api/photos/:id/favorite": {
+      PUT: guard(async (req) => {
+        const id = idParam(req.params.id);
+        if (!id) return bad("Photo not found", 404);
+        const body = (await req.json().catch(() => null)) as { favorite?: unknown } | null;
+        if (typeof body?.favorite !== "boolean") return bad("favorite must be a boolean");
+        return setFavorite(id, body.favorite) ? json({ ok: true }) : bad("Photo not found", 404);
+      }),
+    },
 
     "/api/photos/:id": {
       GET: guard((req) => {

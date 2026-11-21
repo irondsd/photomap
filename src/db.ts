@@ -50,8 +50,6 @@ export interface RootRow {
   last_scan_at: number | null;
 }
 
-const SCHEMA_VERSION = 4;
-
 export const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
@@ -129,7 +127,34 @@ if (version < 3) {
 if (version < 4) {
   db.transaction(() => {
     db.run(`ALTER TABLE photos ADD COLUMN edits TEXT`);
-    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '${SCHEMA_VERSION}')`);
+    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '4')`);
+  })();
+}
+
+if (version < 5) {
+  db.transaction(() => {
+    db.run(`CREATE TABLE albums (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL
+    )`);
+    db.run(`CREATE TABLE album_photos (
+      album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+      photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      PRIMARY KEY (album_id, photo_id)
+    ) WITHOUT ROWID`);
+    db.run(`CREATE INDEX album_photos_photo ON album_photos(photo_id)`);
+    db.run(`CREATE TABLE favorites (
+      photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE
+    )`);
+    db.run(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '5')`);
+  })();
+}
+
+if (version < 6) {
+  db.transaction(() => {
+    db.run("ALTER TABLE albums ADD COLUMN cover_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL");
+    db.run("CREATE INDEX albums_cover_photo ON albums(cover_photo_id) WHERE cover_photo_id IS NOT NULL");
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', '6')");
   })();
 }
 

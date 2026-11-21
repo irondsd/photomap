@@ -4,7 +4,7 @@ import type { BBox, Range } from "./data";
 
 export type WorkerIn =
   | { type: "load"; t: Float64Array; lat: Float32Array; lon: Float32Array; kind: Uint8Array }
-  | { type: "filter"; range: Range | null; kinds: number }
+  | { type: "filter"; range: Range | null; kinds: number; membership: Uint8Array | null }
   | { type: "query"; seq: number; bbox: BBox; zoom: number }
   | { type: "expand"; seq: number; clusterId: number };
 
@@ -39,12 +39,12 @@ let kind: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let filtered = new Int32Array(0); // geotagged indices passing the filter, ascending time
 let index: Supercluster<Props, Agg> | null = null;
 
-function rebuild(range: Range | null, kinds: number) {
+function rebuild(range: Range | null, kinds: number, membership: Uint8Array | null) {
   const idx: number[] = [];
   for (let i = 0; i < t.length; i++) {
     const la = lat[i]!;
     if (la !== la) continue; // NaN: no location
-    if (!((1 << kind[i]!) & kinds)) continue;
+    if ((membership && !membership[i]) || !((1 << kind[i]!) & kinds)) continue;
     if (range) {
       const ti = t[i]!;
       if (!(ti >= range[0] && ti < range[1])) continue;
@@ -117,7 +117,7 @@ self.onmessage = (e: MessageEvent<WorkerIn>) => {
       filtered = new Int32Array(0);
       break;
     case "filter":
-      rebuild(m.range, m.kinds);
+      rebuild(m.range, m.kinds, m.membership);
       break;
     case "query": {
       const out = query(m.seq, m.bbox, m.zoom);
