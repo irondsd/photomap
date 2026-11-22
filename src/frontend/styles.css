@@ -2648,3 +2648,50 @@ h4 {
   outline: 2px solid var(--text);
   outline-offset: -5px;
 }
+.viewer-people {
+  justify-self: stretch;
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.viewer-people button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 3px;
+  margin: 0 -3px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.viewer-people button:hover,
+.viewer-people button:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.viewer-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  color: var(--text-dim);
+}
+.viewer-face img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

@@ -10,6 +10,7 @@ import {
   namePerson,
   personDetail,
   personPhotos,
+  photoPeople,
   setPersonCover,
   setPersonHidden,
   visibleFace,
@@ -507,6 +508,15 @@ const server = Bun.serve({
         const id = idParam(req.params.id);
         return id && visiblePhoto(id, photoVisibility(req))
           ? json(photoAlbums(id), { headers: noStore })
+          : bad("Photo not found", 404);
+      }),
+    },
+
+    "/api/photos/:id/people": {
+      GET: guard((req) => {
+        const id = idParam(req.params.id);
+        return id && visiblePhoto(id, photoVisibility(req))
+          ? json(photoPeople(id), { headers: noStore })
           : bad("Photo not found", 404);
       }),
     },

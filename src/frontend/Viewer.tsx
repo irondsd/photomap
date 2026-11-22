@@ -27,6 +27,7 @@ import { Icon, IconButton } from "./Icons";
 import { usePhotoUrls } from "./photoVisibility";
 import { withPhotoVisibility } from "../photo-visibility";
 import type { AlbumSummary } from "../albums";
+import type { PhotoPerson } from "../people/store";
 
 interface PhotoDetail {
   id: number;
@@ -76,6 +77,9 @@ interface ViewerProps {
   albumsRevision: number;
   albumPickerOpen: boolean;
   onAddToAlbum(id: number): void;
+  peopleRevision: number;
+  /** Open a recognized person's group from this photo. */
+  onOpenPerson(id: number): void;
   onFavorite(id: number, favorite: boolean): Promise<void>;
   onChangePrivacy(ids: number[], makePrivate: boolean): Promise<void>;
 }
@@ -167,6 +171,8 @@ export function Viewer({
   albumsRevision,
   albumPickerOpen,
   onAddToAlbum,
+  peopleRevision,
+  onOpenPerson,
   onFavorite,
   onChangePrivacy,
 }: ViewerProps) {
@@ -194,6 +200,7 @@ export function Viewer({
   const [membership, setMembership] = useState<{ id: number; albums: Pick<AlbumSummary, "id" | "name">[] } | null>(
     null,
   );
+  const [people, setPeople] = useState<{ id: number; people: PhotoPerson[] } | null>(null);
   const [pendingStar, setPendingStar] = useState<{ id: number; favorite: boolean } | null>(null);
   const favorite = pendingStar?.id === id ? pendingStar.favorite : favorites.has(id);
   const [notice, setNotice] = useState<string | null>(null);
@@ -222,6 +229,14 @@ export function Viewer({
       .catch(() => {});
     return () => ac.abort();
   }, [id, albumsRevision, visibility]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    albumRequest<PhotoPerson[]>(withPhotoVisibility(`photos/${id}/people`, visibility), "GET", undefined, ac.signal)
+      .then((found) => setPeople({ id, people: found }))
+      .catch(() => {});
+    return () => ac.abort();
+  }, [id, peopleRevision, visibility]);
 
   const toggleFavorite = async () => {
     if (pendingStar) return;
@@ -720,6 +735,33 @@ export function Viewer({
                       <li key={album.id}>
                         <Icon name="album" />
                         <span>{album.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {people?.id === id && people.people.length > 0 && (
+                <section>
+                  <h4>People</h4>
+                  <ul className="viewer-people">
+                    {people.people.map((person) => (
+                      <li key={person.id}>
+                        <button onClick={() => onOpenPerson(person.id)} title="Show all photos of this person">
+                          <span className="viewer-face">
+                            <Icon name="person" />
+                            <img
+                              src={withPhotoVisibility(`/api/faces/${person.faceId}/cover`, visibility)}
+                              alt=""
+                              loading="lazy"
+                              draggable={false}
+                              onError={(event) => {
+                                event.currentTarget.hidden = true;
+                              }}
+                            />
+                          </span>
+                          <span className={person.name ? undefined : "dim"}>{person.name ?? "Unnamed"}</span>
+                        </button>
                       </li>
                     ))}
                   </ul>

@@ -251,3 +251,24 @@ export const bulkEditPeople = db.transaction((ids: number[], target: number | nu
   }
   return true;
 });
+
+export interface PhotoPerson {
+  id: number;
+  name: string | null;
+  /** This photo's face of the person, for a portrait cropped from this very photo. */
+  faceId: number;
+}
+
+/** Recognized, non-hidden people in one photo, named ones first. */
+export function photoPeople(photoId: number): PhotoPerson[] {
+  if (!hasPeople()) return [];
+  return db
+    .query<PhotoPerson, [number]>(
+      `SELECT g.id, g.name, min(f.id) faceId FROM faces f JOIN face_scans s ON s.photo_id = f.photo_id
+      JOIN photos p ON ${currentScan} JOIN people g ON g.id = f.person_id
+      WHERE p.missing = 0 AND p.id = ?
+      AND NOT EXISTS (SELECT 1 FROM hidden_people h WHERE h.person_id = g.id)
+      GROUP BY g.id ORDER BY g.name IS NULL, g.name COLLATE NOCASE, min(f.x)`,
+    )
+    .all(photoId);
+}

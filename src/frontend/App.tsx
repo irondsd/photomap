@@ -827,6 +827,14 @@ export function App() {
     [points, albumId, personId, selection, navigate],
   );
 
+  const openPerson = useCallback(
+    (person: number) => {
+      afterOverlayClose(() => navigate("people", null, selection, false, person));
+      setViewer(null);
+    },
+    [navigate, selection],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (mode !== "map" || viewer || libraryOpen || (e.target as HTMLElement)?.closest?.("input, textarea, dialog"))
@@ -1247,6 +1255,8 @@ export function App() {
           albumsRevision={albumsRevision}
           albumPickerOpen={albumPicker != null}
           onAddToAlbum={(id) => openAlbumPicker([id])}
+          peopleRevision={peopleRevision}
+          onOpenPerson={openPerson}
           onFavorite={saveFavorite}
           onChangePrivacy={changePrivacy}
           onDeleted={(id) => {
