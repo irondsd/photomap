@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Map as MlMap, LngLatBoundsLike } from "maplibre-gl";
-import { ALL_KINDS, inBBox, loadPoints, lowerBound, type BBox, type Points, type Range } from "./data";
+import { ALL_KINDS, inBBox, loadPoints, lowerBound, passesPhotoFilter, type BBox, type Points, type Range } from "./data";
 import { ClusterClient, type Cluster, type ClusterResult } from "./clusterClient";
 import { MapView } from "./MapView";
 import { Timeline } from "./Timeline";
@@ -89,13 +89,6 @@ const KIND_FILTERS = [
   { label: "Videos", mask: 4 },
 ] as const;
 
-function passes(p: Points, i: number, range: Range | null, kinds: number) {
-  if (!((1 << p.kind[i]!) & kinds)) return false;
-  if (!range) return true;
-  const t = p.t[i]!;
-  return t >= range[0] && t < range[1];
-}
-
 /** Bounds of geotagged photos passing the filter, or null. */
 function boundsOf(
   p: Points,
@@ -112,7 +105,7 @@ function boundsOf(
   const hi = range ? lowerBound(p.t, p.dated, range[1]) : p.n;
   for (let i = lo; i < hi; i++) {
     const la = p.lat[i]!;
-    if (Number.isNaN(la) || (membership && !membership[i]) || !passes(p, i, range, kinds)) continue;
+    if (Number.isNaN(la) || (membership && !membership[i]) || !passesPhotoFilter(p, i, range, kinds)) continue;
     const lo2 = p.lon[i]!;
     if (la < s) s = la;
     if (la > n) n = la;
@@ -617,7 +610,7 @@ export function App() {
     if (!points) return EMPTY;
     const out: number[] = [];
     for (let i = points.n - 1; i >= 0; i--) {
-      if ((!mapMembership || mapMembership[i]) && Number.isNaN(points.lat[i]!) && passes(points, i, selection, kinds))
+      if ((!mapMembership || mapMembership[i]) && Number.isNaN(points.lat[i]!) && passesPhotoFilter(points, i, selection, kinds))
         out.push(i);
     }
     // Undated photos sit at the end of the index; show them last.
@@ -947,6 +940,10 @@ export function App() {
                 <MapView
                   points={points}
                   clusters={result.clusters}
+                  active={mode === "map"}
+                  range={selection}
+                  kinds={kinds}
+                  membership={mapMembership}
                   initial={mapPosition.current ?? initialHash.map}
                   initialBounds={initialBounds}
                   dark={dark}

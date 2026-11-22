@@ -80,6 +80,10 @@ export function inRange(t: number, r: Range | null): boolean {
   return !r || (t >= r[0] && t < r[1]);
 }
 
+export function passesPhotoFilter(points: Points, i: number, range: Range | null, kinds: number): boolean {
+  return Boolean((1 << points.kind[i]!) & kinds) && inRange(points.t[i]!, range);
+}
+
 export type BBox = [west: number, south: number, east: number, north: number];
 
 export function inBBox(lat: number, lon: number, b: BBox): boolean {

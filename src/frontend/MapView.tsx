@@ -1,14 +1,21 @@
 import { usePhotoUrls } from "./photoVisibility";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Map as MlMap, Marker, NavigationControl, ScaleControl, type LngLatBoundsLike } from "maplibre-gl";
-import type { BBox, Points } from "./data";
+import type { BBox, Points, Range } from "./data";
 import type { Cluster } from "./clusterClient";
 import { nf } from "./data";
 import { setMapTheme } from "./map";
+import { heatmapData, showHeatmap } from "./heatmap";
+import { MapViewOptions } from "./MapViewOptions";
 
 export interface MapViewProps {
   points: Points;
   clusters: Cluster[];
+  active: boolean;
+  range: Range | null;
+  kinds: number;
+  membership: Uint8Array | null;
   initial: { center: [number, number]; zoom: number } | null;
   initialBounds: LngLatBoundsLike | null;
   dark: boolean;
@@ -43,12 +50,22 @@ interface Entry {
   cluster: Cluster;
 }
 
+const HEATMAP_PREF = "pm.map.heatmap";
+
 export function MapView(props: MapViewProps) {
   const { thumbnail } = usePhotoUrls();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markers = useRef(new Map<string, Entry>());
   const ping = useRef<Marker | null>(null);
+  const [controls, setControls] = useState<HTMLElement | null>(null);
+  const [heatmap, setHeatmap] = useState(() => {
+    try {
+      return localStorage.getItem(HEATMAP_PREF) === "true";
+    } catch {
+      return false;
+    }
+  });
   const cb = useRef(props);
   cb.current = props;
 
@@ -67,7 +84,11 @@ export function MapView(props: MapViewProps) {
     map.touchZoomRotate.disableRotation();
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new ScaleControl({ maxWidth: 100 }), "bottom-left");
+    const options = document.createElement("div");
+    options.className = "maplibregl-ctrl map-view-options-control";
+    map.addControl({ onAdd: () => options, onRemove: () => options.remove() }, "bottom-right");
     mapRef.current = map;
+    setControls(options);
     const entries = markers.current;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -104,6 +125,13 @@ export function MapView(props: MapViewProps) {
   useEffect(() => {
     if (mapRef.current) setMapTheme(mapRef.current, props.dark);
   }, [props.dark]);
+
+  const { active, points, range, kinds, membership } = props;
+  useLayoutEffect(() => {
+    const map = mapRef.current;
+    if (!map || !controls || !active || !heatmap) return;
+    return showHeatmap(map, heatmapData(points, range, kinds, membership));
+  }, [active, controls, heatmap, kinds, membership, points, range]);
 
   // Sync photo markers with the latest clusters, reusing elements where possible.
   useEffect(() => {
@@ -182,5 +210,25 @@ export function MapView(props: MapViewProps) {
     ping.current.setLngLat([props.points.lon[i]!, props.points.lat[i]!]).addTo(map);
   }, [props.highlight, props.points]);
 
-  return <div ref={container} className="map" />;
+  return (
+    <>
+      <div ref={container} className="map" />
+      {active &&
+        controls &&
+        createPortal(
+          <MapViewOptions
+            heatmap={heatmap}
+            onHeatmapChange={(on) => {
+              setHeatmap(on);
+              try {
+                localStorage.setItem(HEATMAP_PREF, String(on));
+              } catch {
+                // The setting still applies to this map when storage is unavailable.
+              }
+            }}
+          />,
+          controls,
+        )}
+    </>
+  );
 }
