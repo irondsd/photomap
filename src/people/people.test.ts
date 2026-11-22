@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { addRoot, db, setPhotosPrivate } from "../db";
-import { EMBEDDING_SIZE, FaceGroups } from "./group";
+import { EMBEDDING_SIZE, FaceGroups, regroupFaces, rejectionKey, suggestNames } from "./group";
 import {
   bulkEditPeople,
   initPeople,
@@ -9,6 +9,8 @@ import {
   namePerson,
   personDetail,
   personPhotos,
+  regroupPeople,
+  rejectSuggestion,
   setPersonCover,
   setPersonHidden,
   visibleFace,
@@ -20,18 +22,73 @@ const embedding = (x: number, y: number, z = 0) => {
   return values;
 };
 
-test("face grouping rejects ambiguous matches and duplicate assignments within a photo", () => {
+test("face grouping picks the closest group and never reuses a group within a photo", () => {
   const groups = new FaceGroups();
   groups.add(1, embedding(1, 0));
   groups.add(2, embedding(0, 1));
+  groups.add(3, embedding(0.96, 0.28));
 
-  expect(groups.match(embedding(0.96, 0.28), new Set())).toBe(1);
-  expect(groups.match(embedding(Math.SQRT1_2, Math.SQRT1_2), new Set())).toBeNull();
+  // Two close candidates are usually duplicate groups of one person, so take the closest one.
+  expect(groups.match(embedding(0.98, 0.2), new Set())).toBe(3);
   expect(groups.match(embedding(0, 0, 1), new Set())).toBeNull();
-  expect(groups.match(embedding(1, 0), new Set([1]))).toBeNull();
+  expect(groups.match(embedding(1, 0), new Set([1]))).toBe(3);
+  expect(groups.match(embedding(1, 0), new Set([1, 3]))).toBeNull();
+});
 
-  groups.add(1, embedding(0.96, 0.28));
-  expect(groups.match(embedding(0.8, 0.6), new Set())).toBe(1);
+test("regrouping keeps curated people and folds duplicate groups together", () => {
+  let id = 0;
+  const face = (photo: number, person: number, x: number, y: number) => ({
+    id: ++id,
+    photo,
+    person,
+    quality: 1,
+    vector: embedding(x, y),
+  });
+  const faces = [
+    face(1, 10, 1, 0), // named
+    face(2, 10, 0.95, 0.3),
+    face(3, 20, 0.97, 0.2), // a duplicate group of the named person
+    face(4, 21, 0.99, 0.1),
+    face(4, 22, 0.98, 0.15), // a second face in that photo: can't join the same person
+    face(5, 30, 0, 1), // someone else
+    face(6, 31, 0.1, 0.99),
+  ];
+  const fixed = new Set([10]);
+
+  const merged = regroupFaces(faces, fixed, false);
+  expect([1, 2, 3].map((face) => merged.get(face))).toEqual([10, 10, 10]);
+  expect(new Set([merged.get(4), merged.get(5)]).size).toBe(2);
+  expect([merged.get(4), merged.get(5)]).toContain(10);
+  expect(merged.get(6)).toBe(merged.get(7));
+  expect(merged.get(6)).not.toBe(10);
+
+  const rebuilt = regroupFaces(faces, fixed, true);
+  expect(rebuilt.get(1)).toBe(10);
+  expect(rebuilt.get(3)).toBe(10);
+  expect(rebuilt.get(6)).toBeLessThan(0);
+  expect(rebuilt.get(6)).toBe(rebuilt.get(7));
+});
+
+test("close but uncertain groups are suggested, and a no is respected", () => {
+  const faces = [
+    { person: 1, vector: embedding(1, 0) }, // named
+    { person: 2, vector: embedding(0, 1) }, // named
+    { person: 3, vector: embedding(0.5, 0.2, 0.84) }, // ~0.51 to person 1: ask
+    { person: 4, vector: embedding(0, 0, 1) }, // nobody
+  ];
+  const unnamed = new Set([3, 4]);
+  const named = new Set([1, 2]);
+  expect(suggestNames(faces, unnamed, named, new Set())).toEqual([{ id: 3, target: 1, score: expect.any(Number) }]);
+  expect(suggestNames(faces, unnamed, named, new Set([rejectionKey(3, 1)]))).toEqual([]);
+
+  // A rejected pair is never folded together, even when close enough to merge.
+  let id = 0;
+  const grouped = [
+    { id: ++id, photo: 1, person: 10, quality: 1, vector: embedding(1, 0) },
+    { id: ++id, photo: 2, person: 20, quality: 1, vector: embedding(0.95, 0.31) },
+  ];
+  expect(regroupFaces(grouped, new Set([10]), false).get(2)).toBe(10);
+  expect(regroupFaces(grouped, new Set([10]), false, new Set([rejectionKey(20, 10)])).get(2)).toBe(20);
 });
 
 test("merging keeps the target, deduplicates photo counts, and respects photo visibility", () => {
@@ -135,6 +192,19 @@ test("merging keeps the target, deduplicates photo counts, and respects photo vi
     expect(bulkEditPeople.immediate([keep, duplicate, keep], keep, "all")).toBe(true);
     expect(personPhotos(keep, "all")).toEqual([publicPhoto, privatePhoto]);
     expect(personPhotos(duplicate, "all")).toBeNull();
+
+    // Only an unnamed group can be told it isn't a named person.
+    expect(rejectSuggestion.immediate(keep, b, "all")).toBe(true);
+    expect(rejectSuggestion.immediate(b, keep, "all")).toBe(false);
+    expect(listPeople("all").suggestions).toEqual([]);
+
+    // Zero embeddings never match, so a regroup leaves these groups apart and keeps named ones.
+    const stray = Number(db.run("INSERT INTO people DEFAULT VALUES").lastInsertRowid);
+    face(publicPhoto, stray, 0.1);
+    const result = regroupPeople(true);
+    expect(result.removed).toBe(0);
+    expect(personPhotos(b, "all")).toEqual([publicPhoto, privatePhoto]);
+    expect(db.query("SELECT name FROM people WHERE id = ?").get(b)).toEqual({ name: "Named group" });
 
     db.run("UPDATE photos SET mtime = 2 WHERE id = ?", [publicPhoto]);
     expect(personPhotos(b, "public")).toBeNull();

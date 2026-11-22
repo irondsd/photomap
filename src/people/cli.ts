@@ -14,7 +14,7 @@ if (process.env.PHOTOMAP_PEOPLE_AUTO !== "1" || process.env.PHOTOMAP_PEOPLE_PREV
 const { db } = await import("../db");
 const { CPUS, DATA_DIR } = await import("../config");
 const { faceImage } = await import("./images");
-const { pendingFacePhotos, facePhotos, initPeople } = await import("./store");
+const { pendingFacePhotos, facePhotos, initPeople, regroupPeople } = await import("./store");
 type Photo = Parameters<typeof faceImage>[0] & { size: number };
 type Face = FaceBox & { quality: number; embedding: number[] };
 
@@ -174,3 +174,8 @@ console.log(
   `${stopped ? "Paused" : "Finished"}: ${done}/${pending.length} photos processed, ${facesFound} faces, ${failed} errors.`,
 );
 if (stopped) process.exitCode = 130;
+else if (facesFound) {
+  // New faces can bridge two groups of one person. Fold such duplicates together.
+  const { groupsBefore, groupsAfter } = regroupPeople.immediate(false);
+  if (groupsAfter < groupsBefore) console.log(`Merged duplicate groups: ${groupsBefore} → ${groupsAfter}.`);
+}

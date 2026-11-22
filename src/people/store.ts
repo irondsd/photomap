@@ -2,6 +2,7 @@ import { db, photoVisibilityFilter } from "../db";
 import { collectionTaken, memberDate, type AlbumDate } from "../albums";
 import type { PhotoVisibility } from "../photo-visibility";
 import type { FaceBox } from "./images";
+import { rejectionKey, regroupFaces, suggestNames } from "./group";
 
 export interface PersonSummary {
   id: number;
@@ -22,6 +23,8 @@ export interface PersonDetail {
 export interface PeopleCatalog {
   people: PersonSummary[];
   hiddenPeople: PersonSummary[];
+  /** Unnamed groups that look like a named person: "Is this …?" */
+  suggestions: { id: number; target: number }[];
   scanned: number;
   failed: number;
   total: number;
@@ -53,6 +56,11 @@ export function initPeople() {
       x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
       quality REAL NOT NULL,
       embedding BLOB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS person_rejections (
+      person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      named_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      PRIMARY KEY (person_id, named_id)
     );
     CREATE INDEX IF NOT EXISTS faces_photo ON faces(photo_id);
     CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);`);
@@ -148,7 +156,7 @@ export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
       `SELECT count(*) n FROM photos p WHERE p.missing = 0 AND p.kind IN ('photo', 'raw')${scope}`,
     )
     .get()!.n;
-  if (!hasPeople()) return { people: [], hiddenPeople: [], scanned: 0, failed: 0, total };
+  if (!hasPeople()) return { people: [], hiddenPeople: [], suggestions: [], scanned: 0, failed: 0, total };
   const groups = summaries(visibility);
   const { scanned, failed } = db
     .query<{ scanned: number; failed: number }, []>(
@@ -156,14 +164,49 @@ export function listPeople(visibility: PhotoVisibility): PeopleCatalog {
       FROM face_scans s JOIN photos p ON ${currentScan} WHERE p.missing = 0${scope}`,
     )
     .get()!;
+  const people = groups.filter((group) => !group.hidden);
   return {
-    people: groups.filter((group) => !group.hidden),
+    people,
     hiddenPeople: groups.filter((group) => group.hidden),
+    suggestions: suggestionsFor(people),
     total,
     scanned,
     failed,
   };
 }
+
+const rejections = () =>
+  new Set(
+    db
+      .query<{ person_id: number; named_id: number }, []>("SELECT person_id, named_id FROM person_rejections")
+      .all()
+      .map((row) => rejectionKey(row.person_id, row.named_id)),
+  );
+
+const faceVectors = () =>
+  db
+    .query<{ id: number; photo: number; person: number; quality: number; embedding: Uint8Array }, []>(
+      `SELECT f.id, f.photo_id photo, f.person_id person, f.quality, f.embedding ${facePhotos}`,
+    )
+    .all()
+    .map((face) => ({ ...face, vector: new Float32Array(face.embedding.slice().buffer) }));
+
+/** Suggestions among the visible, non-hidden groups. */
+function suggestionsFor(people: PersonSummary[]) {
+  const unnamed = new Set(people.filter((person) => person.name == null).map((person) => person.id));
+  const named = new Set(people.filter((person) => person.name != null).map((person) => person.id));
+  if (!unnamed.size || !named.size) return [];
+  return suggestNames(faceVectors(), unnamed, named, rejections()).map(({ id, target }) => ({ id, target }));
+}
+
+/** Remember that an unnamed group is not this named person, so it isn't suggested or merged again. */
+export const rejectSuggestion = db.transaction((id: number, named: number, visibility: PhotoVisibility) => {
+  const person = db.query<{ name: string | null }, [number]>("SELECT name FROM people WHERE id = ?");
+  if (person.get(id)?.name !== null || person.get(named)?.name == null) return false;
+  if (!personPhotos(id, visibility) || !personPhotos(named, visibility)) return false;
+  db.run("INSERT OR IGNORE INTO person_rejections (person_id, named_id) VALUES (?, ?)", [id, named]);
+  return true;
+});
 
 export function personPhotos(id: number, visibility: PhotoVisibility): number[] | null {
   if (!hasPeople()) return null;
@@ -250,6 +293,63 @@ export const bulkEditPeople = db.transaction((ids: number[], target: number | nu
     else mergePersonInto(id, target);
   }
   return true;
+});
+
+/**
+ * Regroup unnamed faces; named and hidden people keep theirs. See `regroupFaces`. Emptied unnamed
+ * groups are removed and new groups reuse an old id where they can, so covers mostly carry over.
+ */
+export const regroupPeople = db.transaction((reassign: boolean) => {
+  const faces = faceVectors();
+  const fixed = new Set(
+    db
+      .query<{ id: number }, []>(
+        `SELECT id FROM people WHERE name IS NOT NULL UNION SELECT person_id FROM hidden_people`,
+      )
+      .all()
+      .map((row) => row.id),
+  );
+  const assigned = regroupFaces(faces, fixed, reassign, rejections());
+
+  // Give each new group the old unnamed id most of its faces had.
+  const votes = new Map<number, Map<number, number>>();
+  for (const face of faces) {
+    const group = assigned.get(face.id)!;
+    if (group >= 0 || fixed.has(face.person)) continue;
+    let counts = votes.get(group);
+    if (!counts) votes.set(group, (counts = new Map()));
+    counts.set(face.person, (counts.get(face.person) ?? 0) + 1);
+  }
+  const claimed = new Set([...assigned.values()].filter((id) => id >= 0));
+  const ids = new Map<number, number>();
+  const savePerson = db.query<{ id: number }, []>("INSERT INTO people DEFAULT VALUES RETURNING id");
+  for (const [group, counts] of votes) {
+    const reuse = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).find(([id]) => !claimed.has(id))?.[0];
+    const id = reuse ?? savePerson.get()!.id;
+    claimed.add(id);
+    ids.set(group, id);
+  }
+
+  const move = db.query("UPDATE faces SET person_id = ? WHERE id = ? AND person_id != ?");
+  let moved = 0;
+  for (const face of faces) {
+    const group = assigned.get(face.id)!;
+    const id = group < 0 ? ids.get(group)! : group;
+    moved += move.run(id, face.id, id).changes;
+  }
+  const before = new Set(faces.map((face) => face.person));
+  const empty = db.query(
+    "DELETE FROM people WHERE id = ? AND name IS NULL AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?)",
+  );
+  let removed = 0;
+  for (const id of before) if (!fixed.has(id)) removed += empty.run(id, id).changes;
+  return {
+    faces: faces.length,
+    moved,
+    groupsBefore: before.size,
+    groupsAfter: new Set(assigned.values()).size,
+    removed,
+  };
 });
 
 export interface PhotoPerson {

@@ -104,7 +104,11 @@ The **People** tab groups photos by detected faces. Groups start unnamed. Open a
 
 Use **Hide person** on a group to move it out of the main People grid. Open the **Hidden people** card at the end of the grid and choose **Unhide person** to restore a group. Its photos stay in the library, and face matching continues to update the group.
 
+**Possible matches** at the top of People lists unnamed groups that look like someone you've named but weren't close enough to merge on their own. Answer **Yes** to merge the group into that person, or **No** to leave it unnamed. A **No** is remembered: that person isn't suggested for the group again, and automatic merging never combines them. An unnamed group's own page asks the same question under its title.
+
 To clean up several unnamed groups at once, click **Select** or press and hold an unnamed group in the People grid. Pick the groups you want to change. **Merge…** asks you which group to keep, and **Hide selected** moves the selection to **Hidden people**.
+
+Matching assigns each face to the closest group. After each detection run, unnamed groups that look like the same person are merged into a named group or a larger unnamed one, as long as the two groups don't share a photo. To rebuild the groups from scratch after an update to the matching, run `bun run people:regroup` (in Docker: `docker compose exec app bun run people:regroup`). Named and hidden people keep their faces and absorb the faces that match them. Every other face is grouped again, so merges between unnamed groups may change.
 
 Docker Compose includes the local detection models and enables background matching for new or changed photos as they are indexed. The People data is stored in the existing SQLite index. Set `PHOTOMAP_PEOPLE_AUTO=0` in `.env` to pause automatic detection.
 
@@ -132,7 +136,7 @@ PHOTOMAP_DATA="$PWD/data/people-trial" \
 
 Open [People in the preview](http://127.0.0.1:4757/#view=people). The preview listens on loopback and supports People edits and rescans of its registered folders. Phone sync is disabled. The detector reads indexed photos and RAW images locally, including private photos. The normal visibility filter applies to groups, dates, photo counts, and cover images. Videos and files marked missing are skipped.
 
-With automatic detection enabled, use **Library → Rescan all folders** in the preview to pick up new photos in the registered folders. The preview checks its own index for new or changed files and matches them in the background. Matches use the existing groups, including your merges. Uncertain faces can start new groups. The preview has its own index, so changes indexed only by the regular app appear after a preview rescan.
+With automatic detection enabled, use **Library → Rescan all folders** in the preview to pick up new photos in the registered folders. The preview checks its own index for new or changed files and matches them in the background. Matches use the existing groups, including your merges. Faces that match no group start new groups. The preview has its own index, so changes indexed only by the regular app appear after a preview rescan.
 
 The detector saves progress in batches. You can run `bun run people:detect` again to resume or process pending photos manually. Add `--retry-failed` with the same environment to retry files that failed to process. The copy contains the face embeddings and your People edits.
 

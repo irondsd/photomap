@@ -109,6 +109,72 @@ function PeopleCard({
   );
 }
 
+/** "Is this …?" for an unnamed group that looks like a named person. */
+function MatchQuestion({
+  person,
+  target,
+  visibility,
+  compact,
+  onOpen,
+  onAnswer,
+}: {
+  person: PersonSummary;
+  target: PersonSummary;
+  visibility: PhotoVisibility;
+  compact?: boolean;
+  onOpen?(): void;
+  onAnswer(same: boolean): Promise<void>;
+}) {
+  const [busy, setBusy] = useState<boolean | null>(null);
+  const [error, setError] = useState("");
+  const answer = async (same: boolean) => {
+    if (busy != null) return;
+    setBusy(same);
+    setError("");
+    try {
+      await onAnswer(same);
+    } catch (problem) {
+      setError((problem as Error).message);
+      setBusy(null);
+    }
+  };
+  return (
+    <div className={compact ? "people-match people-match-compact" : "people-match"} aria-busy={busy != null}>
+      {!compact && (
+        <div className="people-match-faces">
+          {onOpen ? (
+            <button className="people-match-face" onClick={onOpen} title={`Open ${personName(person)}`}>
+              <Portrait person={person} visibility={visibility} />
+            </button>
+          ) : (
+            <Portrait person={person} visibility={visibility} />
+          )}
+          <Portrait person={target} visibility={visibility} />
+        </div>
+      )}
+      <p>
+        Is this <strong>{personName(target)}</strong>?
+        {!compact && <span className="dim small people-match-count">{photoCount(person.count)}</span>}
+      </p>
+      <div className="row people-match-actions">
+        <button className="btn btn-primary" disabled={busy != null} onClick={() => answer(true)}>
+          {busy === true ? "Merging…" : "Yes"}
+        </button>
+        <button className="btn" disabled={busy != null} onClick={() => answer(false)}>
+          {busy === false ? "Saving…" : "No"}
+        </button>
+      </div>
+      {error && (
+        <p className="error small" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const SUGGESTIONS_PAGE = 8;
+
 export function PeopleView({
   personId,
   hiddenOpen,
@@ -171,6 +237,7 @@ export function PeopleView({
   const [bulkMerge, setBulkMerge] = useState<number[] | null>(null);
   const [bulkHiding, setBulkHiding] = useState(false);
   const [bulkFeedback, setBulkFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+  const [suggestionLimit, setSuggestionLimit] = useState(SUGGESTIONS_PAGE);
   const bulkEnabled = !hiddenOpen && personId == null;
   const selecting = bulkEnabled && selectedPeople != null;
   const selectedCount = selecting ? selectedPeople!.size : 0;
@@ -269,6 +336,28 @@ export function PeopleView({
       setHideAction((action) => (action?.id === id ? { id, busy: false, error: (error as Error).message } : action));
     }
   };
+
+  const visiblePeople = useMemo(() => new Map(catalog?.people.map((entry) => [entry.id, entry])), [catalog]);
+  const suggestions = useMemo(
+    () =>
+      (catalog?.suggestions ?? []).flatMap(({ id, target }) => {
+        const unnamed = visiblePeople.get(id);
+        const named = visiblePeople.get(target);
+        return unnamed && named ? [{ person: unnamed, target: named }] : [];
+      }),
+    [catalog, visiblePeople],
+  );
+  const answerSuggestion = async (id: number, target: number, same: boolean) => {
+    await albumRequest(withPhotoVisibility(`people/${id}/${same ? "merge" : "reject"}`, visibility), "POST", {
+      target,
+    });
+    // Drop the question right away; the reload brings the updated groups and the next suggestions.
+    setCatalog(
+      (current) => current && { ...current, suggestions: current.suggestions.filter((entry) => entry.id !== id) },
+    );
+    reload();
+  };
+  const ownSuggestion = suggestions.find((entry) => entry.person.id === personId);
 
   const groups = hiddenOpen ? catalog?.hiddenPeople : catalog?.people;
   const matching = useMemo(() => groups?.filter((entry) => matches(entry, query)) ?? [], [groups, query]);
@@ -369,6 +458,30 @@ export function PeopleView({
           status
         ) : (
           <>
+            {!hiddenOpen && !selecting && !query && suggestions.length > 0 && (
+              <section className="people-suggestions" aria-labelledby="people-suggestions-title">
+                <h2 id="people-suggestions-title">
+                  Possible matches <span className="dim">{nf.format(suggestions.length)}</span>
+                </h2>
+                <div className="people-suggestion-list">
+                  {suggestions.slice(0, suggestionLimit).map(({ person: unnamed, target }) => (
+                    <MatchQuestion
+                      key={`${unnamed.id}:${target.id}`}
+                      person={unnamed}
+                      target={target}
+                      visibility={visibility}
+                      onOpen={() => onOpen(unnamed.id)}
+                      onAnswer={(same) => answerSuggestion(unnamed.id, target.id, same)}
+                    />
+                  ))}
+                </div>
+                {suggestions.length > suggestionLimit && (
+                  <button className="btn" onClick={() => setSuggestionLimit((value) => value + SUGGESTIONS_PAGE * 2)}>
+                    Show more
+                  </button>
+                )}
+              </section>
+            )}
             {!matching.length && (
               <div className="empty">
                 {query ? "No people match your search." : hiddenOpen ? "No hidden people yet." : "No face groups yet."}
@@ -463,6 +576,19 @@ export function PeopleView({
               <p className="dim">
                 {photoCount(person.count)} · {albumDates(person)}
               </p>
+            )}
+            {ownSuggestion && !person?.hidden && (
+              <MatchQuestion
+                key={ownSuggestion.target.id}
+                compact
+                person={ownSuggestion.person}
+                target={ownSuggestion.target}
+                visibility={visibility}
+                onAnswer={async (same) => {
+                  await answerSuggestion(ownSuggestion.person.id, ownSuggestion.target.id, same);
+                  if (same) onMerged(ownSuggestion.target.id);
+                }}
+              />
             )}
             {hiding?.error && (
               <p className="error" role="alert">

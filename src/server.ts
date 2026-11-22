@@ -11,6 +11,7 @@ import {
   personDetail,
   personPhotos,
   photoPeople,
+  rejectSuggestion,
   setPersonCover,
   setPersonHidden,
   visibleFace,
@@ -393,6 +394,20 @@ const server = Bun.serve({
           return bad("Choose another person to merge into.");
         }
         return mergePeople.immediate(source, target, photoVisibility(req))
+          ? json({ ok: true })
+          : bad("One of these people is no longer available.", 409);
+      }),
+    },
+
+    "/api/people/:id/reject": {
+      POST: guard(async (req) => {
+        const id = idParam(req.params.id);
+        const body = (await req.json().catch(() => null)) as { target?: unknown } | null;
+        const target = body?.target;
+        if (!id || typeof target !== "number" || !Number.isSafeInteger(target) || target < 1 || target === id) {
+          return bad("Choose the suggested person to dismiss.");
+        }
+        return rejectSuggestion.immediate(id, target, photoVisibility(req))
           ? json({ ok: true })
           : bad("One of these people is no longer available.", 409);
       }),

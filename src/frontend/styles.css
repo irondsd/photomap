@@ -2388,6 +2388,69 @@ h4 {
   width: 48px;
   flex: none;
 }
+.people-suggestions {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin: 0 clamp(16px, 3vw, 40px) 28px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.people-suggestions h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.people-suggestion-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr));
+  gap: 16px;
+  width: 100%;
+}
+.people-match {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+.people-match p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.people-match-count {
+  display: block;
+}
+.people-match-faces {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.people-match-face {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  cursor: pointer;
+}
+.people-match-face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.people-match-actions .btn {
+  flex: 1;
+}
+.people-match-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.people-match-compact .people-match-actions .btn {
+  flex: none;
+}
 .people-more {
   display: flex;
   justify-content: center;
