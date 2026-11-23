@@ -1,11 +1,20 @@
 import { useEffect, useId, useRef, useState } from "react";
 
+const LAYER_OPTIONS = [
+  { key: "cards", label: "Photo cards" },
+  { key: "points", label: "Points" },
+  { key: "heatmap", label: "Heatmap" },
+] as const;
+
+export type MapLayer = (typeof LAYER_OPTIONS)[number]["key"];
+export type MapLayers = Record<MapLayer, boolean>;
+
 export function MapViewOptions({
-  heatmap,
-  onHeatmapChange,
+  layers,
+  onLayerChange,
 }: {
-  heatmap: boolean;
-  onHeatmapChange: (on: boolean) => void;
+  layers: MapLayers;
+  onLayerChange: (layer: MapLayer, on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -55,15 +64,17 @@ export function MapViewOptions({
         </svg>
       </button>
       <div id={panel} className="map-view-options-panel" hidden={!open}>
-        <label>
-          Heatmap
-          <input
-            type="checkbox"
-            role="switch"
-            checked={heatmap}
-            onChange={(event) => onHeatmapChange(event.currentTarget.checked)}
-          />
-        </label>
+        {LAYER_OPTIONS.map(({ key, label }) => (
+          <label key={key}>
+            {label}
+            <input
+              type="checkbox"
+              role="switch"
+              checked={layers[key]}
+              onChange={(event) => onLayerChange(key, event.currentTarget.checked)}
+            />
+          </label>
+        ))}
       </div>
     </div>
   );

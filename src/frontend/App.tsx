@@ -788,12 +788,19 @@ export function App() {
     [points],
   );
 
+  const openMapPhoto = useCallback(
+    (index: number) => {
+      const k = result.visible.indexOf(index);
+      if (k >= 0) openViewer(result.visible, k);
+      else openViewer(Int32Array.of(index), 0);
+    },
+    [result.visible, openViewer],
+  );
+
   const onClusterClick = useCallback(
     async (c: Cluster) => {
       if (c.cid < 0) {
-        const k = result.visible.indexOf(c.rep);
-        if (k >= 0) openViewer(result.visible, k);
-        else openViewer(Int32Array.of(c.rep), 0);
+        openMapPhoto(c.rep);
         return;
       }
       const r = await clientRef.current!.expand(c.cid);
@@ -801,7 +808,7 @@ export function App() {
       if (r.leaves) openViewer(r.leaves, 0);
       else mapRef.current?.easeTo({ center: [c.lon, c.lat], zoom: Math.min(r.zoom + 0.2, 18), duration: 500 });
     },
-    [result.visible, openViewer, dataKey, points],
+    [openMapPhoto, openViewer, dataKey, points],
   );
 
   const showOnMap = useCallback(
@@ -940,6 +947,7 @@ export function App() {
                 <MapView
                   points={points}
                   clusters={result.clusters}
+                  visible={result.visible}
                   active={mode === "map"}
                   range={selection}
                   kinds={kinds}
@@ -950,6 +958,7 @@ export function App() {
                   highlight={hover}
                   onView={onView}
                   onClusterClick={onClusterClick}
+                  onPhotoClick={openMapPhoto}
                   onReady={(m) => (mapRef.current = m)}
                 />
               )}

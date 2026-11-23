@@ -7,11 +7,13 @@ import type { Cluster } from "./clusterClient";
 import { nf } from "./data";
 import { setMapTheme } from "./map";
 import { heatmapData, showHeatmap } from "./heatmap";
-import { MapViewOptions } from "./MapViewOptions";
+import { MapPhotoPoints } from "./MapPhotoPoints";
+import { MapViewOptions, type MapLayers } from "./MapViewOptions";
 
 export interface MapViewProps {
   points: Points;
   clusters: Cluster[];
+  visible: Int32Array;
   active: boolean;
   range: Range | null;
   kinds: number;
@@ -22,6 +24,7 @@ export interface MapViewProps {
   highlight: number | null;
   onView(bbox: BBox, zoom: number): void;
   onClusterClick(c: Cluster): void;
+  onPhotoClick(index: number): void;
   onReady(map: MlMap | null): void;
 }
 
@@ -50,7 +53,7 @@ interface Entry {
   cluster: Cluster;
 }
 
-const HEATMAP_PREF = "pm.map.heatmap";
+const DEFAULT_LAYERS: MapLayers = { cards: true, points: false, heatmap: false };
 
 export function MapView(props: MapViewProps) {
   const { thumbnail } = usePhotoUrls();
@@ -59,11 +62,15 @@ export function MapView(props: MapViewProps) {
   const markers = useRef(new Map<string, Entry>());
   const ping = useRef<Marker | null>(null);
   const [controls, setControls] = useState<HTMLElement | null>(null);
-  const [heatmap, setHeatmap] = useState(() => {
+  const [layers, setLayers] = useState<MapLayers>(() => {
     try {
-      return localStorage.getItem(HEATMAP_PREF) === "true";
+      return {
+        cards: localStorage.getItem("pm.map.cards") !== "false",
+        points: localStorage.getItem("pm.map.points") === "true",
+        heatmap: localStorage.getItem("pm.map.heatmap") === "true",
+      };
     } catch {
-      return false;
+      return DEFAULT_LAYERS;
     }
   });
   const cb = useRef(props);
@@ -129,9 +136,9 @@ export function MapView(props: MapViewProps) {
   const { active, points, range, kinds, membership } = props;
   useLayoutEffect(() => {
     const map = mapRef.current;
-    if (!map || !controls || !active || !heatmap) return;
+    if (!map || !controls || !active || !layers.heatmap) return;
     return showHeatmap(map, heatmapData(points, range, kinds, membership));
-  }, [active, controls, heatmap, kinds, membership, points, range]);
+  }, [active, controls, layers.heatmap, kinds, membership, points, range]);
 
   // Sync photo markers with the latest clusters, reusing elements where possible.
   useEffect(() => {
@@ -139,7 +146,7 @@ export function MapView(props: MapViewProps) {
     if (!map) return;
     const points = props.points;
     const next = new Set<string>();
-    for (const c of props.clusters) {
+    for (const c of layers.cards ? props.clusters : []) {
       const key = c.cid >= 0 ? `c${c.cid}` : `p${c.rep}`;
       next.add(key);
       let entry = markers.current.get(key);
@@ -191,7 +198,7 @@ export function MapView(props: MapViewProps) {
         markers.current.delete(key);
       }
     }
-  }, [props.clusters, props.points, thumbnail]);
+  }, [layers.cards, props.clusters, props.points, thumbnail]);
 
   // Location ping for the hovered photo.
   useEffect(() => {
@@ -213,15 +220,27 @@ export function MapView(props: MapViewProps) {
   return (
     <>
       <div ref={container} className="map" />
+      {active && layers.points && mapRef.current && (
+        <MapPhotoPoints
+          map={mapRef.current}
+          points={points}
+          visible={props.visible}
+          range={range}
+          kinds={kinds}
+          membership={membership}
+          dark={props.dark}
+          onOpen={props.onPhotoClick}
+        />
+      )}
       {active &&
         controls &&
         createPortal(
           <MapViewOptions
-            heatmap={heatmap}
-            onHeatmapChange={(on) => {
-              setHeatmap(on);
+            layers={layers}
+            onLayerChange={(layer, on) => {
+              setLayers((current) => ({ ...current, [layer]: on }));
               try {
-                localStorage.setItem(HEATMAP_PREF, String(on));
+                localStorage.setItem(`pm.map.${layer}`, String(on));
               } catch {
                 // The setting still applies to this map when storage is unavailable.
               }
