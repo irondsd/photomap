@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { POINT_SPACING, PointGrid, spreadPhotoPoints } from "./pointLayout";
 
 test("packs a center and six nearby photos into the first hexagonal ring", () => {
-  const points = Array.from({ length: 7 }, (_, index) => ({ x: 200 + index / 2, y: 100, index }));
+  const points = Array.from({ length: 7 }, (_, index) => ({ x: 200 + index * 2, y: 100, index }));
   const placed = spreadPhotoPoints(points);
   expect(placed[0]).toEqual(points[0]!);
   expect(placed.map((point) => point.index)).toEqual(points.map((point) => point.index));

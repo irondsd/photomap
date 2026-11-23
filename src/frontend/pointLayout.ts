@@ -7,7 +7,8 @@ export interface PhotoPoint extends Position {
   index: number;
 }
 
-export const POINT_SPACING = 14;
+export const POINT_SPACING = 10;
+const GROUP_RADIUS = 14;
 
 /** Screen-space lookup for collision detection and picking a dot. */
 export class PointGrid<T extends Position> {
@@ -67,7 +68,7 @@ export function spreadPhotoPoints(points: PhotoPoint[]): PhotoPoint[] {
   const occupied = new PointGrid<PhotoPoint>();
   const placed: PhotoPoint[] = [];
   for (const point of points) {
-    let group = groups.nearest(point.x, point.y, POINT_SPACING);
+    let group = groups.nearest(point.x, point.y, GROUP_RADIUS);
     if (!group) {
       group = { x: point.x, y: point.y, slots: hexSlots() };
       groups.add(group);
