@@ -6,8 +6,9 @@
     <title>Photomap</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='13' r='9' fill='%23e8590c'/%3E%3Cpath d='M16 31 8 18h16z' fill='%23e8590c'/%3E%3Ccircle cx='16' cy='13' r='4' fill='white'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cstyle%3Epath%7Bfill:%23e8590c%7D%40media (prefers-color-scheme:dark)%7Bpath%7Bfill:%23ff8a3d%7D%7D%3C/style%3E%3Cpath fill-rule='evenodd' d='M16 28.8 7.8 18.56A10.5 10.5 0 1 1 24.2 18.56ZM16 7.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z'/%3E%3C/svg%3E"
     />
+    <!-- The pin's centre is a hole, so tab bars show through in light and dark; the fill follows the browser theme. -->
     <script>
       // Apply the saved theme before first paint; App keeps it in sync afterwards.
       try {
