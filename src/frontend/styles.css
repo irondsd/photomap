@@ -220,7 +220,8 @@ h4 {
 
 .app {
   display: grid;
-  grid-template-rows: 52px 1fr;
+  /* viewport-fit=cover: on a phone the topbar runs up under the status bar and keeps its content below it. */
+  grid-template-rows: calc(52px + env(safe-area-inset-top, 0px)) 1fr;
   height: 100%;
 }
 
@@ -279,7 +280,8 @@ h4 {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 16px;
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0
+    max(16px, env(safe-area-inset-left, 0px));
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -412,11 +414,19 @@ h4 {
   background: var(--panel);
   box-shadow: var(--shadow);
 }
-.pm-point-preview:is(.maplibregl-popup-anchor-bottom, .maplibregl-popup-anchor-bottom-left, .maplibregl-popup-anchor-bottom-right)
+.pm-point-preview:is(
+    .maplibregl-popup-anchor-bottom,
+    .maplibregl-popup-anchor-bottom-left,
+    .maplibregl-popup-anchor-bottom-right
+  )
   .maplibregl-popup-tip {
   border-top-color: var(--panel);
 }
-.pm-point-preview:is(.maplibregl-popup-anchor-top, .maplibregl-popup-anchor-top-left, .maplibregl-popup-anchor-top-right)
+.pm-point-preview:is(
+    .maplibregl-popup-anchor-top,
+    .maplibregl-popup-anchor-top-left,
+    .maplibregl-popup-anchor-top-right
+  )
   .maplibregl-popup-tip {
   border-bottom-color: var(--panel);
 }
@@ -752,7 +762,7 @@ h4 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 14px;
+  padding: max(12px, env(safe-area-inset-top, 0px)) 14px 12px;
   background: linear-gradient(rgb(0 0 0 / 0.5), transparent);
 }
 .viewer-top-actions {
@@ -956,7 +966,8 @@ h4 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px 4px;
+  /* viewport-fit=cover: on a phone the drawer runs up under the status bar. */
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 4px;
   background: var(--panel);
 }
 .drawer-head h2 {
@@ -967,7 +978,7 @@ h4 {
 }
 .library-panel {
   overflow-y: auto;
-  padding: 20px 20px 24px;
+  padding: 20px 20px calc(24px + env(safe-area-inset-bottom, 0px));
 }
 .library-panel:focus-visible {
   outline: 2px solid var(--accent);
@@ -1526,7 +1537,7 @@ h4 {
   z-index: 95;
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
   background: rgb(0 0 0 / 0.45);
   animation: fade 140ms ease-out;
 }
@@ -2675,41 +2686,120 @@ h4 {
 .viewer-albums .ui-icon {
   color: var(--text-dim);
 }
+.viewer-sheet-handle {
+  display: none;
+}
+/* Narrow screens: info is a sheet over the bottom of the photo, opened with Info or a swipe up. */
 @media (max-width: 900px) {
   .viewer .viewer-details {
     display: block;
     position: absolute;
-    inset: 56px 0 0 auto;
-    width: min(320px, 100%);
-    box-shadow: 0 0 30px rgb(0 0 0 / 0.45);
+    inset: auto 0 0;
+    width: auto;
+    max-height: 62%;
+    padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    border-left: 0;
+    border-top: 1px solid #262626;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 30px rgb(0 0 0 / 0.45);
+    animation: sheet-up 200ms ease-out;
+  }
+  .viewer-sheet-handle {
+    display: block;
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    width: calc(100% + 40px);
+    height: 28px;
+    margin: 0 -20px 4px;
+    padding: 0;
+    border: 0;
+    background: #161616;
+    cursor: pointer;
+  }
+  .viewer-sheet-handle::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 12px auto;
+    border-radius: 2px;
+    background: #4a4741;
+  }
+  .viewer-sheet-handle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 }
+@keyframes sheet-up {
+  from {
+    transform: translateY(48px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viewer .viewer-details {
+    animation: none;
+  }
+}
+/* Phones: the views move to a tab bar along the bottom edge, within reach of a thumb. */
 @media (max-width: 560px) {
   .app {
-    grid-template-rows: 88px 1fr;
+    --tabbar-height: calc(58px + env(safe-area-inset-bottom, 0px));
+    grid-template-rows: calc(52px + env(safe-area-inset-top, 0px)) 1fr;
+    padding-bottom: var(--tabbar-height);
   }
   .topbar {
+    gap: 8px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .view-switch {
+    position: fixed;
+    z-index: 80;
+    inset: auto 0 0;
     display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: 44px 36px;
-    gap: 0 8px;
-    align-content: center;
-    padding-inline: 10px;
+    grid-template-columns: repeat(4, 1fr);
+    height: var(--tabbar-height);
+    padding: 0 max(4px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px)
+      max(4px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--panel);
   }
-  .topbar > [aria-label="View"] {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .segmented.view-switch button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 58px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    font-size: 11px;
+    color: var(--text-dim);
   }
-  .topbar > [aria-label="View"] button {
-    flex: 1;
+  .segmented.view-switch button[aria-pressed="true"] {
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+  .segmented.view-switch .ui-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
   }
   .topbar-right {
-    gap: 5px;
+    gap: 6px;
   }
   .topbar-right .pill {
-    max-width: 74px;
+    max-width: 120px;
     white-space: nowrap;
     overflow: hidden;
+  }
+  .album-notice {
+    bottom: calc(var(--tabbar-height) + 16px);
   }
   .album-cards {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 142px), 1fr));
@@ -2724,9 +2814,6 @@ h4 {
   .album-heading .icon-btn {
     width: 44px;
     height: 44px;
-  }
-  .gtile .gcheck {
-    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2873,4 +2960,247 @@ h4 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* ------------------------------------------------------------ phones and narrow screens */
+
+.view-switch .ui-icon,
+.sheet-handle {
+  display: none;
+}
+.drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.check {
+  white-space: nowrap;
+}
+/* Two fingers resize the rows (Gallery.tsx), so the browser mustn't zoom the page. */
+.gallery-scroll {
+  touch-action: pan-y;
+}
+/* A long press selects a photo, instead of the browser's image menu. */
+.gtile {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+@media (max-width: 900px) {
+  /* Under the map the photos fold down to their tabs until one is tapped. */
+  .sidebar:has(> .sheet-handle) {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .map-layout:has(> .sidebar.is-collapsed) {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .sidebar.is-collapsed .grid-wrap {
+    display: none;
+  }
+  .sheet-handle {
+    display: block;
+    width: 100%;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+  .sheet-handle::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 8px auto 6px;
+    border-radius: 2px;
+    background: var(--bar-muted);
+  }
+  .sheet-handle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .sidebar .tabs {
+    padding-top: 0;
+  }
+}
+@media (max-width: 560px) {
+  .map-layout {
+    grid-template-rows: minmax(0, 1fr) 55%;
+  }
+  /* The date rail gives the photos more of a narrow screen. */
+  .scrubber {
+    width: 40px;
+  }
+  .scrubber-year {
+    right: 4px;
+    font-size: 10px;
+  }
+  .scrubber-dot {
+    right: 14px;
+  }
+  .scrubber-thumb {
+    width: 32px;
+  }
+  .scrubber-hover {
+    right: 40px;
+  }
+  /* No gutter for the day checkbox: it joins the header while selecting. */
+  .gheader .gcheck {
+    margin-left: 0;
+  }
+  .gallery:not(.is-selecting) .gheader .gcheck {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------ phone app sync */
+
+/* The phone app's sync, as a pill under the top bar that opens into its details. Above the tab bar,
+   below the library drawer and the photo viewer. */
+.phone-sync-toast {
+  position: fixed;
+  z-index: 85;
+  top: calc(52px + env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  max-width: calc(100% - 32px);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: phone-sync-in 180ms ease-out;
+}
+.phone-sync-toast .spinner {
+  color: var(--accent);
+}
+.phone-sync-toast .ui-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-text);
+}
+.phone-sync-toast[data-state="attention"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.phone-sync-alert {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+}
+.phone-sync-toast-open {
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100% - 32px));
+  height: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  white-space: normal;
+  cursor: default;
+}
+.phone-sync-toast-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.phone-sync-toast-head strong {
+  flex: 1;
+  font-weight: 600;
+}
+.phone-sync-toast-head .btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.phone-sync-toast-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+@keyframes phone-sync-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phone-sync-toast {
+    animation: none;
+  }
+}
+
+.phone-sync-details {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.phone-sync-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-sync-failures {
+  display: grid;
+  gap: 2px;
+}
+
+.phone-sync-connected {
+  gap: 8px;
+  color: var(--text-dim);
+}
+.phone-sync-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f9e5a;
+}
+:root[data-theme="dark"] .phone-sync-dot {
+  background: #5cc486;
+}
+.phone-sync-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.phone-sync-card-head {
+  gap: 8px;
+}
+.phone-sync-card-head .spinner {
+  color: var(--accent);
+}
+.phone-sync-ranges {
+  flex-wrap: wrap;
+}
+.drawer .phone-sync-panel > .btn {
+  justify-self: stretch;
+  justify-content: center;
+  height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.phone-sync-pairing {
+  justify-content: space-between;
+}
+.btn.danger {
+  color: var(--danger);
 }

@@ -4,7 +4,7 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "r
 import { SafeAreaView } from "react-native-safe-area-context";
 import { hello } from "./api";
 import { parsePairing, type Pairing } from "./pairing";
-import { useTheme } from "./theme";
+import { radius, useTheme } from "./theme";
 
 /** Scans the code in Photomap's Library → Phone sync and checks the server answers before accepting it. */
 export function Scanner({ onPaired, onCancel }: { onPaired: (p: Pairing) => void; onCancel: () => void }) {
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: "#000" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, padding: 32 },
   message: { fontSize: 16, textAlign: "center", lineHeight: 22 },
-  button: { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
+  button: { paddingHorizontal: 24, paddingVertical: 14, borderRadius: radius.control },
   buttonText: { fontSize: 16, fontWeight: "600" },
   link: { fontSize: 15 },
   overlay: { flex: 1, alignItems: "center", justifyContent: "space-between", padding: 24 },
@@ -97,9 +97,9 @@ const styles = StyleSheet.create({
   footer: { alignItems: "center", gap: 14, marginBottom: 16 },
   error: {
     color: "#fff",
-    backgroundColor: "rgba(194,59,48,0.92)",
+    backgroundColor: "rgba(201,42,42,0.92)",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: radius.control,
     textAlign: "center",
     overflow: "hidden",
   },

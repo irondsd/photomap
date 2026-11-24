@@ -20,6 +20,14 @@ export type HelloResponse = {
   protocol: number;
 };
 
+/**
+ * POST /api/sync/web-code: a one-time link that signs this phone's browser in to the web app.
+ * `path` is relative to the pairing URL and works once, within a minute.
+ */
+export type WebCodeResponse = {
+  path: string;
+};
+
 export type MediaKind = "photo" | "video";
 
 /**

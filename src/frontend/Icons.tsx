@@ -54,6 +54,14 @@ const paths = {
     </>
   ),
   map: <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15" />,
+  gallery: (
+    <>
+      <rect x="4" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </>
+  ),
   plus: <path d="M12 5v14M5 12h14" />,
   back: <path d="m11 5-7 7 7 7M4 12h16" />,
   trash: <path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13m-8 4v5m4-5v5" />,

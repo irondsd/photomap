@@ -1,6 +1,7 @@
 import { usePhotoUrls } from "./photoVisibility";
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatDate, formatMonth, nf, type Points } from "./data";
+import { NARROW, useMediaQuery } from "./media";
 
 export type SidebarTab = "map" | "noloc";
 
@@ -113,14 +114,31 @@ export function Sidebar(props: SidebarProps) {
   const hasNoLocation = props.noLocation.length > 0;
   const tab: SidebarTab = hasNoLocation ? props.tab : "map";
   const list = tab === "map" ? props.onMap : props.noLocation;
+  // Under the map on narrow screens the photos fold down to their tabs, leaving the map the room.
+  const narrow = useMediaQuery(NARROW);
+  const [folded, setFolded] = useState(true);
+  const collapsed = narrow && folded;
+  const pick = (t: SidebarTab) => {
+    props.onTab(t);
+    setFolded(false);
+  };
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? "is-collapsed" : ""}`}>
+      {narrow && (
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-expanded={!folded}
+          aria-label={folded ? "Show photos" : "Hide photos"}
+          onClick={() => setFolded(!folded)}
+        />
+      )}
       <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "map"} className="tab" onClick={() => props.onTab("map")}>
+        <button role="tab" aria-selected={tab === "map"} className="tab" onClick={() => pick("map")}>
           In this area <span className="count">{nf.format(props.onMap.length)}</span>
         </button>
         {hasNoLocation && (
-          <button role="tab" aria-selected={tab === "noloc"} className="tab" onClick={() => props.onTab("noloc")}>
+          <button role="tab" aria-selected={tab === "noloc"} className="tab" onClick={() => pick("noloc")}>
             No location <span className="count">{nf.format(props.noLocation.length)}</span>
           </button>
         )}

@@ -5,6 +5,7 @@ import {
   type CheckResponse,
   type HelloResponse,
   type ManifestItem,
+  type WebCodeResponse,
 } from "./protocol";
 
 /** A request the server answered with an error, as opposed to one that never got through. */
@@ -44,6 +45,12 @@ export async function hello(pairing: Pairing, signal?: AbortSignal): Promise<Hel
     throw new Error("Photomap and this app speak different sync versions. Update the older one.");
   }
   return res;
+}
+
+/** A one-time link that signs the phone's browser in to the Photomap web app. */
+export async function webLink(pairing: Pairing): Promise<string> {
+  const res = await request<WebCodeResponse>(pairing, "/api/sync/web-code", { method: "POST" });
+  return pairing.url + res.path;
 }
 
 export async function check(pairing: Pairing, items: ManifestItem[]): Promise<string[]> {

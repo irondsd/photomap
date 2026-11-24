@@ -184,7 +184,7 @@ export function useSyncStatus(onReceived: () => void) {
   return { status, error: error ?? loadError, setStatus, act };
 }
 
-/** The Library's phone sync section: a switch, and the code the Photomap Sync app scans. */
+/** The Library's phone sync section: a switch, and the code the Photomap phone app scans. */
 export function SyncSection({ sync }: { sync: ReturnType<typeof useSyncStatus> }) {
   const { status, error, setStatus, act } = sync;
   const reset = () => {
@@ -197,7 +197,8 @@ export function SyncSection({ sync }: { sync: ReturnType<typeof useSyncStatus> }
   return (
     <section>
       <p className="dim small">
-        The Photomap Sync app sends your phone's photos and videos here over wifi, with their locations.
+        The Photomap phone app shows this library on your phone and sends the phone's photos and videos here over wifi,
+        with their locations, each time it opens. Unpairing signs it out.
       </p>
       <SyncFolder status={status} onChange={setStatus} />
       <label className="row sync-toggle">
@@ -221,7 +222,7 @@ export function SyncSection({ sync }: { sync: ReturnType<typeof useSyncStatus> }
             <div className="sync-pair">
               <div className="sync-qr" dangerouslySetInnerHTML={{ __html: status.qr }} />
               <div className="small">
-                <p>Open Photomap Sync on your phone and tap Scan pairing code.</p>
+                <p>Open Photomap on your phone and tap Scan pairing code.</p>
                 <p className="dim">
                   The phone must be on the same wifi. It connects to <span className="mono">{status.url}</span>.
                 </p>

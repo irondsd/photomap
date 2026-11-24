@@ -102,9 +102,8 @@ function PeopleCard({
         </span>
       )}
       <strong>{personName(person)}</strong>
-      <span className="album-card-meta dim">
-        {photoCount(person.count)} · {albumDates(person)}
-      </span>
+      <span className="album-card-meta dim">{photoCount(person.count)}</span>
+      {albumDates(person) && <span className="album-card-meta dim">{albumDates(person)}</span>}
     </button>
   );
 }
@@ -412,8 +411,8 @@ export function PeopleView({
                 }}
               />
             )}
-            <button className="btn" onClick={reload}>
-              Refresh
+            <button className="btn" onClick={reload} title="Show people found since this page opened">
+              Update list
             </button>
             {bulkEnabled && !selecting && !!catalog?.people.some((entry) => !entry.name) && (
               <button className="btn" onClick={() => setSelectedPeople(new Set())}>

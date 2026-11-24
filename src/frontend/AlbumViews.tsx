@@ -71,9 +71,9 @@ export function AlbumList({
           <button className="album-card" key={album.id} onClick={() => onOpen(album.id)}>
             <AlbumCover album={album} />
             <strong>{album.name}</strong>
-            <span className="album-card-meta dim">
-              {[albumDates(album), itemCount(album.count)].filter(Boolean).join(" · ")}
-            </span>
+            {/* Two lines, so a long date range doesn't push the count onto a line of its own. */}
+            {albumDates(album) && <span className="album-card-meta dim">{albumDates(album)}</span>}
+            <span className="album-card-meta dim">{itemCount(album.count)}</span>
           </button>
         ))}
         <button className="album-card" onClick={onOpenPrivate}>

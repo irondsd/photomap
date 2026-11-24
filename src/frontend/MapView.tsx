@@ -87,6 +87,8 @@ export function MapView(props: MapViewProps) {
       attributionControl: { compact: true },
       dragRotate: false,
       pitchWithRotate: false,
+      // Zoomed out, one world rather than copies side by side, each without its photos.
+      renderWorldCopies: false,
     });
     map.touchZoomRotate.disableRotation();
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");

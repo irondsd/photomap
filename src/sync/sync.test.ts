@@ -6,7 +6,19 @@ import { addRoot, db } from "../db";
 import { setSyncLayout } from "./folder";
 import { UPLOAD_HEADERS, type ManifestItem } from "./protocol";
 import { destination, safeFilename } from "./receive";
-import { authorized, handleSync, lanAddresses, pairingToken, resetToken } from "./service";
+import {
+  authorized,
+  handleSync,
+  lanAddresses,
+  pairingToken,
+  phoneSession,
+  resetToken,
+  sessionValue,
+  setWebTarget,
+} from "./service";
+
+// Nothing listens here: a signed-in request that got past the checks would fail to connect, not pass.
+setWebTarget("http://127.0.0.1:9");
 
 function req(path: string, init: RequestInit & { token?: string | null } = {}) {
   const { token = pairingToken(), ...rest } = init;
@@ -52,9 +64,62 @@ describe("auth", () => {
     expect(authorized(req("/api/sync/hello", { token: before }))).toBe(false);
   });
 
-  test("serves nothing but the sync API", async () => {
-    expect((await send(req("/api/points"))).status).toBe(404);
-    expect((await send(req("/original/1"))).status).toBe(404);
+  test("serves nothing but the sync API to a phone that isn't signed in to the web app", async () => {
+    expect((await send(req("/api/points"))).status).toBe(401);
+    expect((await send(req("/original/1"))).status).toBe(401);
+    expect((await send(req("/", { token: null }))).status).toBe(401);
+  });
+});
+
+describe("web app for paired phones", () => {
+  const webCode = async (token?: string | null) => {
+    const r = await send(req("/api/sync/web-code", { method: "POST", token }));
+    return { status: r.status, path: r.ok ? ((await r.json()) as { path: string }).path : "" };
+  };
+  const open = (path: string) => send(req(path, { token: null }));
+  const sessionCookie = (r: Response) => (r.headers.get("set-cookie") ?? "").split(";")[0]!;
+
+  test("needs the pairing token to get a code", async () => {
+    expect((await webCode(null)).status).toBe(401);
+    expect((await webCode("nope")).status).toBe(401);
+  });
+
+  test("a code signs the browser in once, without putting the token anywhere", async () => {
+    const { path } = await webCode();
+    expect(path).not.toContain(pairingToken());
+    const first = await open(path);
+    expect(first.status).toBe(200);
+    expect(await first.text()).toContain('location.replace("/")');
+    const set = first.headers.get("set-cookie")!;
+    expect(set).toContain("HttpOnly");
+    expect(set).toContain("SameSite=Lax");
+    expect(set).not.toContain(pairingToken());
+    expect(sessionCookie(first)).toBe(`pm_phone=${sessionValue()}`);
+    expect((await open(path)).status).toBe(401);
+    expect((await open("/phone/open?code=made-up")).status).toBe(401);
+  });
+
+  test("the session cookie is what opens the web app, and unpairing ends it", async () => {
+    const signedIn = (cookie: string) => phoneSession(req("/", { token: null, headers: { cookie } }));
+    const value = `pm_phone=${sessionValue()}`;
+    expect(signedIn(`other=1; ${value}`)).toBe(true);
+    expect(signedIn("pm_phone=nope")).toBe(false);
+    resetToken();
+    expect(signedIn(value)).toBe(false);
+  });
+
+  test("a request the main server can't answer gets a page, not a dropped connection", async () => {
+    const r = await send(req("/", { token: null, headers: { cookie: `pm_phone=${sessionValue()}` } }));
+    expect(r.status).toBe(502);
+    expect(r.headers.get("connection")).toBe("close");
+  });
+
+  test("refuses writes from another site", async () => {
+    const cookie = `pm_phone=${sessionValue()}`;
+    const r = await send(
+      req("/api/albums", { method: "POST", token: null, headers: { cookie, origin: "http://evil.example" } }),
+    );
+    expect(r.status).toBe(403);
   });
 });
 

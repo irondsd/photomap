@@ -73,6 +73,18 @@ export function placement(v: View, base: Size, stage: Size, dpr: number) {
   return { w, h, left: snap((stage.w - w) / 2 + v.x), top: snap((stage.h - h) / 2 + v.y) };
 }
 
+export type SwipeDirection = "left" | "right" | "up" | "down";
+
+/** A flick: far enough, quick enough, and mostly along one axis. */
+export function swipeDirection(dx: number, dy: number, ms: number): SwipeDirection | null {
+  if (ms > 800) return null;
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax >= 50 && ax > ay * 1.5) return dx < 0 ? "left" : "right";
+  if (ay >= 70 && ay > ax * 1.5) return dy < 0 ? "up" : "down";
+  return null;
+}
+
 const midpoint = (ps: Pt[]): Pt => ({
   x: ps.reduce((a, p) => a + p.x, 0) / ps.length,
   y: ps.reduce((a, p) => a + p.y, 0) / ps.length,
@@ -89,6 +101,8 @@ export function useZoom(
   pixels: number | null,
   enabled: boolean,
   photoKey: unknown,
+  /** A one-finger flick on the unzoomed image, for touch screens. */
+  onSwipe?: (direction: SwipeDirection) => void,
 ) {
   const [view, setView] = useState<View>(IDENTITY);
   const [animate, setAnimate] = useState(false);
@@ -196,6 +210,8 @@ export function useZoom(
   const gesture = useRef<{ view: View; mid: Pt; dist: number } | null>(null);
   /** The last press moved: it was a drag, not a click. */
   const moved = useRef(false);
+  /** Where a one-finger touch started, while it can still be a swipe. */
+  const swipe = useRef<{ x: number; y: number; t: number } | null>(null);
 
   const startGesture = () => {
     const ps = [...pointers.current.values()];
@@ -207,6 +223,10 @@ export function useZoom(
     // Buttons and overlays on the stage keep their clicks.
     if (e.target !== e.currentTarget && e.target !== imgRef.current) return;
     if (pointers.current.size === 0) moved.current = false;
+    swipe.current =
+      pointers.current.size === 0 && e.pointerType !== "mouse" && viewRef.current.s === 1
+        ? { x: e.clientX, y: e.clientY, t: e.timeStamp }
+        : null;
     pointers.current.set(e.pointerId, toStage(e.clientX, e.clientY));
     startGesture();
   };
@@ -235,7 +255,16 @@ export function useZoom(
   const onPointerUp = (e: ReactPointerEvent<HTMLElement>) => {
     if (!pointers.current.delete(e.pointerId)) return;
     startGesture();
-    if (pointers.current.size === 0) setPanning(false);
+    if (pointers.current.size > 0) {
+      swipe.current = null;
+      return;
+    }
+    setPanning(false);
+    const start = swipe.current;
+    swipe.current = null;
+    if (!start || !onSwipe || e.type === "pointercancel" || viewRef.current.s !== 1) return;
+    const direction = swipeDirection(e.clientX - start.x, e.clientY - start.y, e.timeStamp - start.t);
+    if (direction) onSwipe(direction);
   };
 
   const onDoubleClick = (e: ReactMouseEvent<HTMLElement>) => {

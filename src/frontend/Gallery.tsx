@@ -9,7 +9,13 @@ import { Icon } from "./Icons";
 // Room on the left for the day headers' select-all checks.
 const LEFT = 44;
 const SCRUBBER_W = 56;
+/** Phones: the gutter for the day checkboxes and the date rail shrink (styles.css matches at 560px). */
+const LEFT_NARROW = 12;
+const SCRUBBER_W_NARROW = 40;
+const NARROW_W = 560;
 const OVERSCAN = 800;
+/** How long a finger rests on a photo to select it. */
+const LONG_PRESS_MS = 450;
 // Shift/Cmd/Ctrl + scroll (or a trackpad pinch) scales the rows by this much.
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3;
@@ -88,8 +94,9 @@ export function Gallery({
     () => galleryOrder(points, kinds, membership, oldestFirst),
     [points, kinds, membership, oldestFirst],
   );
-  const left = grouped ? LEFT : 16;
-  const contentW = Math.max(0, box.w - left - (grouped ? SCRUBBER_W : 16));
+  const phone = box.w <= NARROW_W;
+  const left = grouped ? (phone ? LEFT_NARROW : LEFT) : 16;
+  const contentW = Math.max(0, box.w - left - (grouped ? (phone ? SCRUBBER_W_NARROW : SCRUBBER_W) : 16));
   const [zoom, setZoom] = useState(() => {
     const z = Number(localStorageGet(ZOOM_KEY));
     return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1;
@@ -134,20 +141,22 @@ export function Gallery({
       // Browsers turn Shift + wheel into horizontal scrolling.
       const delta = (e.deltaY || e.deltaX) * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 600 : 1);
       // Pinches report small deltas; a mouse notch is ~100.
-      const z = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, zoomRef.current * Math.exp(-delta * (e.ctrlKey && !e.shiftKey ? 0.01 : 0.002))),
-      );
+      scaleTo(zoomRef.current * Math.exp(-delta * (e.ctrlKey && !e.shiftKey ? 0.01 : 0.002)), e.clientY);
+    };
+    /** Rows to scale `target`, keeping the photo under `clientY` in place. */
+    const scaleTo = (target: number, clientY: number) => {
+      const l = layoutRef.current;
+      if (!l || !l.order.length) return;
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target));
       if (z === zoomRef.current) return;
       zoomRef.current = z;
       if (!zoomAnchor.current) {
-        const cy = e.clientY - content.current!.getBoundingClientRect().top;
+        const cy = clientY - content.current!.getBoundingClientRect().top;
         const k = Math.min(l.order.length - 1, firstVisible(l.y, l.h, l.order.length, cy));
         const y = l.y[k]!;
         const h = l.h[k]!;
         // Above the tile means a day header, which doesn't scale.
-        zoomAnchor.current =
-          cy < y ? { k, f: 0, px: cy - y, clientY: e.clientY } : { k, f: (cy - y) / h, px: 0, clientY: e.clientY };
+        zoomAnchor.current = cy < y ? { k, f: 0, px: cy - y, clientY } : { k, f: (cy - y) / h, px: 0, clientY };
       }
       cancelAnimationFrame(zoomFrame.current);
       zoomFrame.current = requestAnimationFrame(() => {
@@ -155,8 +164,36 @@ export function Gallery({
         localStorageSet(ZOOM_KEY, String(zoomRef.current));
       });
     };
+    // Two fingers pinch the rows bigger or smaller; one still scrolls.
+    let pinch: { dist: number; zoom: number } | null = null;
+    const fingers = (t: TouchList) => {
+      const [a, b] = [t[0]!, t[1]!];
+      return { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), y: (a.clientY + b.clientY) / 2 };
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      pinch = e.touches.length === 2 ? { dist: Math.max(fingers(e.touches).dist, 1), zoom: zoomRef.current } : null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const f = fingers(e.touches);
+      scaleTo((pinch.zoom * f.dist) / pinch.dist, f.y);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+    };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
   }, []);
 
   useLayoutEffect(() => {
@@ -230,7 +267,45 @@ export function Gallery({
     anchor.current = null;
   }, []);
 
+  // A long press selects, on touch screens where there's no hover to show the check.
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; fired: boolean } | null>(null);
+  const startPress = (k: number, e: React.PointerEvent) => {
+    if (e.pointerType === "mouse") return;
+    // A second finger is a pinch, not a press.
+    if (press.current && !press.current.fired) {
+      clearTimeout(press.current.timer);
+      press.current = null;
+      return;
+    }
+    const p = { x: e.clientX, y: e.clientY, fired: false, timer: setTimeout(() => {}, 0) };
+    p.timer = setTimeout(() => {
+      p.fired = true;
+      navigator.vibrate?.(10);
+      toggle(k);
+    }, LONG_PRESS_MS);
+    press.current = p;
+  };
+  const movePress = (e: React.PointerEvent) => {
+    const p = press.current;
+    if (p && !p.fired && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) {
+      clearTimeout(p.timer);
+      press.current = null;
+    }
+  };
+  const endPress = () => {
+    const p = press.current;
+    if (p && !p.fired) {
+      clearTimeout(p.timer);
+      press.current = null;
+    }
+  };
+
   const onTileClick = (k: number, e: React.MouseEvent) => {
+    // The click that ends a long press was the selection itself.
+    if (press.current?.fired) {
+      press.current = null;
+      return;
+    }
     if (e.shiftKey && (selecting || anchor.current != null)) selectRange(k);
     else if (selecting || e.metaKey || e.ctrlKey) toggle(k);
     else onOpen(layout!.order, k);
@@ -347,7 +422,7 @@ export function Gallery({
         <div
           key={`g${g.start}`}
           className={`gheader ${all ? "is-selected" : ""}`}
-          style={{ top: g.y, left: LEFT, width: contentW }}
+          style={{ top: g.y, left, width: contentW }}
         >
           <button
             className="gcheck"
@@ -375,6 +450,11 @@ export function Gallery({
           className={`gtile ${sel ? "is-selected" : ""}`}
           style={{ left: layout.x[k], top: layout.y[k], width: layout.w[k], height: layout.h[k] }}
           onClick={coverPicker ? undefined : (e) => onTileClick(k, e)}
+          onPointerDown={coverPicker ? undefined : (e) => startPress(k, e)}
+          onPointerMove={movePress}
+          onPointerUp={endPress}
+          onPointerCancel={endPress}
+          onContextMenu={(e) => press.current && e.preventDefault()}
         >
           <img
             src={thumbnail(id, "m")}

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { clampPan, fitSize, IDENTITY, maxScale, placement, zoomAt } from "./zoom";
+import { clampPan, fitSize, IDENTITY, maxScale, placement, swipeDirection, zoomAt } from "./zoom";
 
 describe("zoomAt", () => {
   test("keeps the point under the cursor still", () => {
@@ -89,5 +89,21 @@ describe("placement", () => {
   test("snaps to device pixels", () => {
     const p = placement({ s: 1.333, x: 10.3, y: -7.77 }, { w: 800, h: 600 }, { w: 1000, h: 600 }, 2);
     for (const n of Object.values(p)) expect(Number.isInteger(n * 2)).toBe(true);
+  });
+});
+
+describe("swipeDirection", () => {
+  test("a quick sideways flick turns the page", () => {
+    expect(swipeDirection(-120, 10, 200)).toBe("left");
+    expect(swipeDirection(90, -20, 300)).toBe("right");
+  });
+  test("a vertical flick closes or opens", () => {
+    expect(swipeDirection(5, 140, 250)).toBe("down");
+    expect(swipeDirection(-10, -100, 250)).toBe("up");
+  });
+  test("short, diagonal or slow drags are not swipes", () => {
+    expect(swipeDirection(30, 0, 100)).toBeNull();
+    expect(swipeDirection(80, 70, 200)).toBeNull();
+    expect(swipeDirection(-200, 0, 1200)).toBeNull();
   });
 });

@@ -25,7 +25,8 @@ export function setMapTheme(map: MlMap, dark: boolean) {
 function liftDark(style: StyleSpecification): StyleSpecification {
   const layers = style.layers.map((l) => {
     if (l.id === "water" && l.type === "fill") return { ...l, paint: { ...l.paint, "fill-color": "rgb(38, 42, 48)" } };
-    if (l.id === "waterway" && l.type === "line") return { ...l, paint: { ...l.paint, "line-color": "rgb(38, 42, 48)" } };
+    if (l.id === "waterway" && l.type === "line")
+      return { ...l, paint: { ...l.paint, "line-color": "rgb(38, 42, 48)" } };
     if (l.id.startsWith("place_") && l.type === "symbol") {
       return { ...l, paint: { ...l.paint, "text-color": "rgb(135, 135, 135)" } };
     }

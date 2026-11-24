@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { TOUCH, useMediaQuery } from "./media";
 import {
   APPROX,
   addUnit,
@@ -39,6 +40,8 @@ const MIN_BAR_PX = 5;
 const MIN_TICK_PX = 64;
 const MIN_SPAN = 6 * 3600;
 const EDGE_PX = 6;
+/** A finger is less precise than a cursor: the selection edges grab from further away. */
+const EDGE_PX_TOUCH = 20;
 
 const BIN_UNITS: [Unit, number][] = [
   ["hour", 1],
@@ -176,7 +179,9 @@ type Drag =
   | { mode: "brush"; x0: number; t0: number; moved: boolean }
   | { mode: "move"; x0: number; sel: Range }
   | { mode: "resize"; edge: 0 | 1; sel: Range }
-  | { mode: "pan"; x0: number; view: Range };
+  | { mode: "pan"; x0: number; view: Range }
+  /** Two fingers: zoom about their midpoint, which also pans as they move. */
+  | { mode: "pinch"; dist: number; mid: number; view: Range };
 
 function cssVar(el: Element, name: string) {
   return getComputedStyle(el).getPropertyValue(name).trim();
@@ -197,6 +202,10 @@ export function Timeline(props: TimelineProps) {
   };
   const [hoverX, setHoverX] = useState<number | null>(null);
   const drag = useRef<Drag | null>(null);
+  /** Pointers down on the canvas, by id, at their x: two make a pinch. */
+  const fingers = useRef(new Map<number, number>());
+  const touch = useMediaQuery(TOUCH);
+  const edgePx = touch ? EDGE_PX_TOUCH : EDGE_PX;
   const anim = useRef<number>(0);
   const lastCommit = useRef(0);
 
@@ -387,11 +396,18 @@ export function Timeline(props: TimelineProps) {
     const y = e.clientY - canvas.current!.getBoundingClientRect().top;
     cancelAnimationFrame(anim.current);
     canvas.current!.setPointerCapture(e.pointerId);
+    fingers.current.set(e.pointerId, x);
+    if (fingers.current.size >= 2) {
+      const [a, b] = [...fingers.current.values()] as [number, number];
+      drag.current = { mode: "pinch", dist: Math.max(Math.abs(a - b), 1), mid: (a + b) / 2, view };
+      setDraft(null);
+      return;
+    }
     if (y > size.h - AXIS_H) {
       drag.current = { mode: "pan", x0: x, view };
-    } else if (selection && Math.abs(x - xOf(selection[0])) < EDGE_PX) {
+    } else if (selection && Math.abs(x - xOf(selection[0])) < edgePx) {
       drag.current = { mode: "resize", edge: 0, sel: selection };
-    } else if (selection && Math.abs(x - xOf(selection[1])) < EDGE_PX) {
+    } else if (selection && Math.abs(x - xOf(selection[1])) < edgePx) {
       drag.current = { mode: "resize", edge: 1, sel: selection };
     } else if (selection && x > xOf(selection[0]) && x < xOf(selection[1])) {
       drag.current = { mode: "move", x0: x, sel: selection };
@@ -408,13 +424,25 @@ export function Timeline(props: TimelineProps) {
     const el = canvas.current!;
     if (!d) {
       const nearEdge =
-        selection && (Math.abs(x - xOf(selection[0])) < EDGE_PX || Math.abs(x - xOf(selection[1])) < EDGE_PX);
+        selection && (Math.abs(x - xOf(selection[0])) < edgePx || Math.abs(x - xOf(selection[1])) < edgePx);
       const inside = selection && x > xOf(selection[0]) && x < xOf(selection[1]);
       el.style.cursor = y > size.h - AXIS_H ? "grab" : nearEdge ? "ew-resize" : inside ? "move" : "crosshair";
       return;
     }
+    if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, x);
     const t = tOf(x);
     switch (d.mode) {
+      case "pinch": {
+        if (fingers.current.size < 2) return;
+        const [a, b] = [...fingers.current.values()] as [number, number];
+        const s0 = d.view[1] - d.view[0];
+        const ns = Math.min(Math.max((s0 * d.dist) / Math.max(Math.abs(a - b), 1), MIN_SPAN), maxSpan);
+        // The moment under the fingers' first midpoint stays under their midpoint now.
+        const tc = d.view[0] + (d.mid / size.w) * s0;
+        const start = tc - ((a + b) / 2 / size.w) * ns;
+        setView(clampView([start, start + ns]));
+        break;
+      }
       case "pan": {
         const dt = ((d.x0 - x) / size.w) * (d.view[1] - d.view[0]);
         setView(clampView([d.view[0] + dt, d.view[1] + dt]));
@@ -446,7 +474,13 @@ export function Timeline(props: TimelineProps) {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    fingers.current.delete(e.pointerId);
     const d = drag.current;
+    if (d?.mode === "pinch") {
+      // Lifting one finger ends the pinch; the other doesn't start a new drag.
+      if (fingers.current.size < 2) drag.current = null;
+      return;
+    }
     drag.current = null;
     if (!d) return;
     canvas.current!.releasePointerCapture(e.pointerId);
@@ -536,7 +570,11 @@ export function Timeline(props: TimelineProps) {
               </span>
             </>
           ) : (
-            <span className="dim">Drag to select a time range · scroll to zoom · drag the axis to pan</span>
+            <span className="dim">
+              {touch
+                ? "Drag to select dates · pinch to zoom"
+                : "Drag to select a time range · scroll to zoom · drag the axis to pan"}
+            </span>
           )}
         </div>
         <div className="timeline-actions">

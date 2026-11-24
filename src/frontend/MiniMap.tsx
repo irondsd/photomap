@@ -1,8 +1,11 @@
 import { useEffect, useRef } from "react";
 import { Map as MlMap, Marker, NavigationControl } from "maplibre-gl";
-import { collapseAttribution, STYLE } from "./map";
+import { collapseAttribution, setMapTheme } from "./map";
 
-/** Small map with a pin, for the viewer's info panel. Moves instead of reloading between photos. */
+/**
+ * Small map with a pin, for the viewer's info panel. Moves instead of reloading between photos.
+ * Dark, like the viewer around it, whatever the app's theme.
+ */
 export function MiniMap({ lat, lon }: { lat: number; lon: number }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
@@ -11,7 +14,6 @@ export function MiniMap({ lat, lon }: { lat: number; lon: number }) {
   useEffect(() => {
     const m = new MlMap({
       container: el.current!,
-      style: STYLE.detailed,
       center: [lon, lat],
       zoom: 13,
       attributionControl: { compact: true },
@@ -21,6 +23,7 @@ export function MiniMap({ lat, lon }: { lat: number; lon: number }) {
       scrollZoom: false,
     });
     m.touchZoomRotate.disableRotation();
+    setMapTheme(m, true);
     collapseAttribution(m);
     m.addControl(new NavigationControl({ showCompass: false }), "top-right");
     const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#e8590c";

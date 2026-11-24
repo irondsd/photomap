@@ -56,7 +56,7 @@ import { dropThumbs, getThumb, hasThumb, pregenerateThumbs, thumbETag, THUMB_SIZ
 import { forbidden } from "./security";
 import { withPhotoVisibility, type PhotoVisibility } from "./photo-visibility";
 import { resetSyncDir, setSyncDir, setSyncLayout, syncDir } from "./sync/folder";
-import { resetToken, resumeSync, startSync, stopSync, syncStatus } from "./sync/service";
+import { resetToken, resumeSync, setWebTarget, startSync, stopSync, syncStatus } from "./sync/service";
 
 const peopleAuto = process.env.PHOTOMAP_PEOPLE_AUTO === "1";
 if (PEOPLE_PREVIEW || peopleAuto) db.run("PRAGMA busy_timeout = 5000");
@@ -290,6 +290,7 @@ function serveFile(path: string, ext: string, req: Request): Response {
 }
 
 const VENDOR_DIR = join(import.meta.dir, "..", "node_modules", "maplibre-gl", "dist");
+const PWA_FILES = new Set(["icon-180.png", "icon-192.png", "icon-512.png"]);
 const VENDOR_FILES = new Set(["maplibre-gl-worker.mjs", "maplibre-gl-worker.mjs.map"]);
 
 // The cluster worker is bundled separately (HTML imports only bundle the page), on first request.
@@ -947,6 +948,33 @@ const server = Bun.serve({
       }),
     },
 
+    // Home-screen install: the app's name, colours and icon (the phone app's, at the sizes phones ask for).
+    "/manifest.webmanifest": {
+      GET: guard(
+        () =>
+          new Response(
+            JSON.stringify({
+              name: "Photomap",
+              short_name: "Photomap",
+              start_url: "/",
+              display: "standalone",
+              background_color: "#f6f5f2",
+              theme_color: "#ffffff",
+              icons: [192, 512].map((n) => ({ src: `/pwa/icon-${n}.png`, sizes: `${n}x${n}`, type: "image/png" })),
+            }),
+            { headers: { "content-type": "application/manifest+json", "cache-control": "max-age=86400" } },
+          ),
+      ),
+    },
+    "/pwa/:file": {
+      GET: guard((req) => {
+        if (!PWA_FILES.has(req.params.file)) return bad("not found", 404);
+        return new Response(Bun.file(join(import.meta.dir, "frontend", "pwa", req.params.file)), {
+          headers: { "content-type": "image/png", "cache-control": "max-age=86400" },
+        });
+      }),
+    },
+
     "/vendor/:file": {
       GET: guard((req) => {
         if (!VENDOR_FILES.has(req.params.file)) return bad("not found", 404);
@@ -973,6 +1001,8 @@ const server = Bun.serve({
 const publicHost = process.env.PHOTOMAP_ALLOWED_HOSTS?.split(",")[0]?.trim() || `photomap.localhost:${server.port}`;
 console.log(`Photomap running at http://${publicHost}`);
 
+// Paired phones reach the web app through the sync listener, which passes their requests on here.
+setWebTarget(`http://${HOST === "0.0.0.0" || HOST === "::" ? "127.0.0.1" : HOST}:${server.port}`);
 if (!PEOPLE_PREVIEW) resumeSync(scanSynced);
 if (peopleAuto) watchForNewPhotos(() => scanStatus.running);
 

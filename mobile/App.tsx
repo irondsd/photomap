@@ -1,12 +1,12 @@
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import type { Pairing } from "./src/pairing";
+import { Home } from "./src/Home";
 import { Scanner } from "./src/Scanner";
 import { loadPairing, savePairing } from "./src/settings";
-import { SyncScreen } from "./src/SyncScreen";
-import { useTheme } from "./src/theme";
+import { radius, useTheme } from "./src/theme";
 
 type Screen =
   | { kind: "loading" }
@@ -36,7 +36,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={screen.kind === "scanning" ? "light" : "auto"} />
+      {/* Home sets its own, to match the web app's bars. */}
+      {screen.kind === "paired" ? null : <StatusBar style={screen.kind === "scanning" ? "light" : "auto"} />}
       {screen.kind === "loading" ? null : screen.kind === "scanning" ? (
         <Scanner
           onPaired={paired}
@@ -45,7 +46,7 @@ export default function App() {
           }
         />
       ) : screen.kind === "paired" ? (
-        <SyncScreen
+        <Home
           pairing={screen.pairing}
           onUnpair={unpair}
           onRescan={() => setScreen({ kind: "scanning", previous: screen.pairing })}
@@ -62,9 +63,11 @@ function Welcome({ onScan }: { onScan: () => void }) {
   return (
     <SafeAreaView style={[styles.welcome, { backgroundColor: theme.background }]}>
       <View style={styles.copy}>
-        <Text style={[styles.title, { color: theme.text }]}>Photomap Sync</Text>
+        <Image source={require("./assets/splash-icon.png")} style={styles.logo} accessibilityIgnoresInvertColors />
+        <Text style={[styles.title, { color: theme.text }]}>Photomap</Text>
         <Text style={[styles.body, { color: theme.muted }]}>
-          Sends the photos and videos on this phone to your Photomap library over wifi, with their locations intact.
+          Your Photomap library on this phone, over wifi. Photos and videos you take sync to it by themselves, with
+          their locations intact.
         </Text>
         <Text style={[styles.body, { color: theme.muted }]}>
           To pair, open Photomap on your computer and go to Library → Phone sync.
@@ -80,8 +83,10 @@ function Welcome({ onScan }: { onScan: () => void }) {
 const styles = StyleSheet.create({
   welcome: { flex: 1, padding: 24, justifyContent: "space-between" },
   copy: { flex: 1, justifyContent: "center", gap: 14 },
-  title: { fontSize: 30, fontWeight: "700" },
+  // The pin fills the middle 45% of the image: pull it back so it lines up with the text.
+  logo: { width: 96, height: 96, marginLeft: -26, marginBottom: -8 },
+  title: { fontSize: 28, fontWeight: "600" },
   body: { fontSize: 16, lineHeight: 23 },
-  button: { borderRadius: 14, paddingVertical: 16, alignItems: "center" },
+  button: { borderRadius: radius.control, paddingVertical: 15, alignItems: "center" },
   buttonText: { fontSize: 17, fontWeight: "600" },
 });

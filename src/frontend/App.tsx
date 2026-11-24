@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Map as MlMap, LngLatBoundsLike } from "maplibre-gl";
-import { ALL_KINDS, inBBox, loadPoints, lowerBound, passesPhotoFilter, type BBox, type Points, type Range } from "./data";
+import {
+  ALL_KINDS,
+  inBBox,
+  loadPoints,
+  lowerBound,
+  passesPhotoFilter,
+  type BBox,
+  type Points,
+  type Range,
+} from "./data";
 import { ClusterClient, type Cluster, type ClusterResult } from "./clusterClient";
 import { MapView } from "./MapView";
 import { Timeline } from "./Timeline";
 import { Sidebar, type SidebarTab } from "./Sidebar";
 import { Viewer } from "./Viewer";
-import { AddFolder, Library, ScanProgress, type ScanStatus, type Stats } from "./Library";
+import { AddFolder, Library, ScanProgress, type LibraryTab, type ScanStatus, type Stats } from "./Library";
+import { SyncToast } from "./PhoneSync";
+import { useAppBridge } from "./phoneApp";
 import { Gallery } from "./Gallery";
 import { PeopleView, personName } from "./People";
 import { albumRequest, AlbumEditDialog, AlbumHeader, AlbumList, AlbumPicker } from "./AlbumViews";
@@ -293,6 +304,12 @@ export function App() {
     [points],
   );
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("overview");
+  const openLibrary = (tab: LibraryTab = "overview") => {
+    setLibraryTab(tab);
+    setLibraryOpen(true);
+  };
+  useAppBridge();
   const [albumCatalog, setAlbumCatalog] = useState<{ key: string; value: AlbumCatalog } | null>(null);
   const catalog = albumCatalog?.key === dataKey ? albumCatalog.value : null;
   const [catalogError, setCatalogError] = useState("");
@@ -610,7 +627,11 @@ export function App() {
     if (!points) return EMPTY;
     const out: number[] = [];
     for (let i = points.n - 1; i >= 0; i--) {
-      if ((!mapMembership || mapMembership[i]) && Number.isNaN(points.lat[i]!) && passesPhotoFilter(points, i, selection, kinds))
+      if (
+        (!mapMembership || mapMembership[i]) &&
+        Number.isNaN(points.lat[i]!) &&
+        passesPhotoFilter(points, i, selection, kinds)
+      )
         out.push(i);
     }
     // Undated photos sit at the end of the index; show them last.
@@ -877,16 +898,19 @@ export function App() {
           <span className="brand-mark" aria-hidden />
           Photomap
         </div>
-        <div className="segmented" role="group" aria-label="View">
+        {/* A row of tabs at the bottom of the screen on phones, within reach of a thumb. */}
+        <div className="segmented view-switch" role="group" aria-label="View">
           <button
             aria-pressed={mode === "map"}
             onClick={() => {
               if (mode !== "map") navigate("map");
             }}
           >
+            <Icon name="map" />
             Map
           </button>
           <button aria-pressed={mode === "gallery"} onClick={() => navigate("gallery")}>
+            <Icon name="gallery" />
             Gallery
           </button>
           <button
@@ -896,6 +920,7 @@ export function App() {
               else navigate("albums");
             }}
           >
+            <Icon name="album" />
             Albums
           </button>
           <button
@@ -905,6 +930,7 @@ export function App() {
               else navigate("people");
             }}
           >
+            <Icon name="person" />
             People
           </button>
         </div>
@@ -917,15 +943,14 @@ export function App() {
         </div>
         <div className="topbar-right">
           {scan?.running && (
-            <button className="pill" onClick={() => setLibraryOpen(true)}>
+            <button className="pill" onClick={() => openLibrary()}>
               <span className="spinner" aria-hidden />
               {scan.phase === "walking"
                 ? "Scanning…"
                 : `Indexing ${Math.round((scan.processed / Math.max(1, scan.found)) * 100)}%`}
             </button>
           )}
-          <ThemeSwitch value={theme} onChange={setTheme} />
-          <button className="btn" onClick={() => setLibraryOpen(true)}>
+          <button className="btn" onClick={() => openLibrary()}>
             Library
           </button>
         </div>
@@ -1329,10 +1354,13 @@ export function App() {
           )}
         </div>
       )}
+      <SyncToast onOpenSettings={() => openLibrary("sync")} />
       {libraryOpen && (
         <Library
+          initialTab={libraryTab}
           stats={stats}
           scan={scan}
+          themeSwitch={<ThemeSwitch value={theme} onChange={setTheme} />}
           onClose={() => setLibraryOpen(false)}
           onChanged={() => {
             pollScan();

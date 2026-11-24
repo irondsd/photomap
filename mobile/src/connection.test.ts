@@ -63,3 +63,10 @@ describe("probe", () => {
     expect(await probe(pairing)).toMatchObject({ state: "offline", reason: expect.stringContaining("versions") });
   });
 });
+
+test("a refused connection reads as unreachable, not as Java", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("fetch failed: java.net.ConnectException: Failed to connect to /192.168.1.33:4748");
+  }) as unknown as typeof fetch;
+  expect(await probe(pairing)).toMatchObject({ state: "offline", reason: expect.stringContaining("Can't reach") });
+});

@@ -28,6 +28,7 @@ import { usePhotoUrls } from "./photoVisibility";
 import { withPhotoVisibility } from "../photo-visibility";
 import type { AlbumSummary } from "../albums";
 import type { PhotoPerson } from "../people/store";
+import { NARROW, TOUCH, useMediaQuery } from "./media";
 
 interface PhotoDetail {
   id: number;
@@ -187,10 +188,10 @@ export function Viewer({
    * effects only after paint, and a cached neighbour can finish loading before a reset would land. */
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const loaded = loadedId === id;
-  const [showInfo, setShowInfo] = useState(() => {
-    const preference = localStorageGet("pm.info");
-    return preference == null ? !matchMedia("(max-width: 900px)").matches : preference !== "0";
-  });
+  /** On narrow screens the info panel is a sheet over the photo: it starts closed and isn't remembered. */
+  const narrow = useMediaQuery(NARROW);
+  const touch = useMediaQuery(TOUCH);
+  const [showInfo, setShowInfo] = useState(() => !matchMedia(NARROW).matches && localStorageGet("pm.info") !== "0");
   const [editing, setEditing] = useState(false);
   const [editingDate, setEditingDate] = useState(false);
   /** The photo editor is open. */
@@ -212,7 +213,16 @@ export function Viewer({
   const shown = d?.width && d.height ? (d.edits ? editedSize(d.width, d.height, d.edits) : [d.width, d.height]) : null;
   const pixels = d?.kind === "photo" && shown ? Math.max(...shown) : null;
   const stamp = thumbStamp(id);
-  const zoom = useZoom(stageRef, imgRef, pixels, !isVideo, id);
+  const zoom = useZoom(stageRef, imgRef, pixels, !isVideo, id, (direction) => {
+    if (editingPhoto) return;
+    if (direction === "left" && index < ids.length - 1) onIndex(index + 1);
+    else if (direction === "right" && index > 0) onIndex(index - 1);
+    else if (direction === "up" && narrow) setShowInfo(true);
+    else if (direction === "down") {
+      if (narrow && showInfo) setShowInfo(false);
+      else onClose();
+    }
+  });
   /** Photo id whose original has been decoded and replaces the 2048px preview. */
   const [fullId, setFullId] = useState<number | null>(null);
   const fullRequested = useRef<string | null>(null);
@@ -346,7 +356,7 @@ export function Viewer({
 
   const toggleInfo = () =>
     setShowInfo((v) => {
-      localStorageSet("pm.info", v ? "0" : "1");
+      if (!narrow) localStorageSet("pm.info", v ? "0" : "1");
       return !v;
     });
 
@@ -598,7 +608,9 @@ export function Viewer({
                 </div>
               )}
             </div>
-            {!showInfo && <IconButton name="close" label="Close (Esc)" className="btn-overlay" onClick={onClose} />}
+            {(!showInfo || narrow) && (
+              <IconButton name="close" label="Close (Esc)" className="btn-overlay" onClick={onClose} />
+            )}
           </div>
         </div>
         {notice && (
@@ -620,7 +632,11 @@ export function Viewer({
 
       {showInfo && (
         <aside className={`viewer-info viewer-details ${editing ? "is-editing" : ""}`} aria-label="Photo information">
-          <IconButton name="close" label="Close (Esc)" className="viewer-close" onClick={onClose} />
+          {narrow ? (
+            <button type="button" className="viewer-sheet-handle" aria-label="Hide info" onClick={toggleInfo} />
+          ) : (
+            <IconButton name="close" label="Close (Esc)" className="viewer-close" onClick={onClose} />
+          )}
           {!d ? (
             <div className="dim">Loading…</div>
           ) : (
@@ -792,12 +808,15 @@ export function Viewer({
                 </div>
                 <div className="dim break small">{d.path}</div>
                 <div className="row">
-                  <button
-                    className="btn btn-small"
-                    onClick={() => fetch(photoUrl(`/api/reveal/${id}`), { method: "POST" })}
-                  >
-                    Show in Finder
-                  </button>
+                  {/* It opens Finder on the computer, which is no help from a phone. */}
+                  {!touch && (
+                    <button
+                      className="btn btn-small"
+                      onClick={() => fetch(photoUrl(`/api/reveal/${id}`), { method: "POST" })}
+                    >
+                      Show in Finder
+                    </button>
+                  )}
                   <a
                     className="btn btn-small"
                     href={isPrivate ? photoUrl(`/original/${id}`) : `/original/${id}`}

@@ -23,7 +23,8 @@ export async function probe(pairing: Pairing, timeoutMs = PROBE_TIMEOUT_MS): Pro
     if (e instanceof ServerError && e.status === 401) return { state: "unpaired" };
     if (e instanceof ServerError) return { state: "offline", reason: e.message };
     // Aborted by the timeout, or the request never got through.
-    if (controller.signal.aborted || e instanceof TypeError) {
+    // React Native's fetch reports a refused connection as "fetch failed: java.net.ConnectException…".
+    if (controller.signal.aborted || e instanceof TypeError || /fetch failed|network|exception|timed? ?out/i.test(String(e))) {
       return { state: "offline", reason: `Can't reach ${pairing.name} at ${host(pairing.url)}.` };
     }
     return { state: "offline", reason: e instanceof Error ? e.message : String(e) };

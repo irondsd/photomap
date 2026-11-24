@@ -1,6 +1,8 @@
-import { useEffect, useId, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { formatDate, nf } from "./data";
 import { SyncSection, useSyncStatus } from "./Sync";
+import { PhoneSyncPanel } from "./PhoneSync";
+import { inPhoneApp } from "./phoneApp";
 import { useBackToClose } from "./history";
 
 export interface Stats {
@@ -43,6 +45,8 @@ const libraryTabs = [
   ["folders", "Folders"],
   ["sync", "Phone Sync"],
 ] as const;
+
+export type LibraryTab = (typeof libraryTabs)[number][0];
 
 async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const r = await fetch(url, {
@@ -368,14 +372,19 @@ export function Library({
   scan,
   onClose,
   onChanged,
+  themeSwitch,
+  initialTab = "overview",
 }: {
   stats: Stats | null;
   scan: ScanStatus | null;
   onClose(): void;
   onChanged(): void;
+  /** The light / dark / system control, kept here rather than in the topbar: it's set once. */
+  themeSwitch?: ReactNode;
+  initialTab?: LibraryTab;
 }) {
   useBackToClose(onClose);
-  const [tab, setTab] = useState<(typeof libraryTabs)[number][0]>("overview");
+  const [tab, setTab] = useState<LibraryTab>(initialTab);
   const id = useId();
   const sync = useSyncStatus(onChanged);
   useEffect(() => {
@@ -422,7 +431,8 @@ export function Library({
         onChanged={onChanged}
       />
     ),
-    sync: <SyncSection sync={sync} />,
+    // Inside the phone app this is the phone's own sync; elsewhere, the pairing code and settings.
+    sync: inPhoneApp ? <PhoneSyncPanel /> : <SyncSection sync={sync} />,
   };
 
   return (
@@ -430,9 +440,12 @@ export function Library({
       <div className="drawer" role="dialog" aria-label="Library">
         <header className="drawer-head">
           <h2>Library</h2>
-          <button className="btn btn-ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <div className="drawer-head-actions">
+            {themeSwitch}
+            <button className="btn btn-ghost" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
         </header>
         <div className="tabs library-tabs" role="tablist" aria-label="Library sections">
           {libraryTabs.map(([value, label], index) => (
