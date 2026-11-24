@@ -4,8 +4,10 @@
   --panel-2: #f0eee9;
   --border: #e3e0d8;
   --text: #1d1b17;
-  --text-dim: #77736a;
+  --text-dim: #6b675f;
   --accent: #e8590c;
+  /* Accent as small text: the brand orange is only 3:1 on its own tint. */
+  --accent-text: #b83d0b;
   --accent-fg: #ffffff;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --bar-muted: #c9c4b8;
@@ -27,8 +29,10 @@
   --text: #ece9e3;
   --text-dim: #8f8b83;
   --accent: #ff8a3d;
+  --accent-text: #ff8a3d;
   --accent-fg: #1a1009;
   --bar-muted: #4a4741;
+  --danger: #ff8787;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 20px rgb(0 0 0 / 0.4);
   color-scheme: dark;
 }
@@ -193,7 +197,7 @@ h4 {
   border: 0;
   border-radius: 999px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -2030,7 +2034,7 @@ h4 {
   stroke-linecap: round;
 }
 .tweak-value {
-  color: #77736a;
+  color: #9a968e;
   font-variant-numeric: tabular-nums;
 }
 .tweak-value.is-set {
